@@ -121,7 +121,7 @@ export default function DestinationsPage() {
                 <TableCell>{d.label}</TableCell>
                 <TableCell>
                   <Typography variant="caption" fontFamily="monospace">
-                    {d.urlHint}
+                    {d.webhookUrl}
                   </Typography>
                 </TableCell>
                 <TableCell>

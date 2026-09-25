@@ -15,7 +15,6 @@ export const up: Migration = async ({ context: queryInterface }) => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         label: { type: DataTypes.TEXT, allowNull: false },
         webhook_url: { type: DataTypes.TEXT, allowNull: false },
-        url_hint: { type: DataTypes.TEXT, allowNull: false },
         created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: literal('now()') },
       },
       { transaction },

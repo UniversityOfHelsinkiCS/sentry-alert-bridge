@@ -19,7 +19,7 @@ export interface NormalizedIssue {
 export interface DestinationDto {
   id: number
   label: string
-  urlHint: string
+  webhookUrl: string
   createdAt: string
   lastOutcome: DeliveryOutcome | null
   lastDeliveryAt: string | null

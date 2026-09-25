@@ -26,7 +26,6 @@ export class SlackDestination extends Model<
   declare id: CreationOptional<number>
   declare label: string
   declare webhookUrl: string
-  declare urlHint: string
   declare createdAt: CreationOptional<Date>
 }
 
@@ -35,7 +34,6 @@ SlackDestination.init(
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     label: { type: DataTypes.TEXT, allowNull: false },
     webhookUrl: { type: DataTypes.TEXT, allowNull: false },
-    urlHint: { type: DataTypes.TEXT, allowNull: false },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   },
   { ...common, tableName: 'slack_destinations' },
