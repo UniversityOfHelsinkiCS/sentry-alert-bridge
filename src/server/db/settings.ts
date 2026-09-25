@@ -1,18 +1,15 @@
-import { query } from './pool.js'
+import { Setting } from './models.js'
 
 export interface Settings {
   lastPollAt: Date | null
 }
 
 export async function getSettings(): Promise<Settings> {
-  const { rows } = await query<{ last_poll_at: Date | null }>(
-    'select last_poll_at from settings where id = 1',
-  )
-  const row = rows[0]
+  const row = await Setting.findByPk(1)
   if (!row) throw new Error('settings row is missing; migrations may not have run')
-  return { lastPollAt: row.last_poll_at }
+  return { lastPollAt: row.lastPollAt }
 }
 
 export async function touchLastPoll(): Promise<void> {
-  await query('update settings set last_poll_at = now() where id = 1')
+  await Setting.update({ lastPollAt: new Date() }, { where: { id: 1 } })
 }

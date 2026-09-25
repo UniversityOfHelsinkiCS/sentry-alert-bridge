@@ -1,52 +1,38 @@
+import { literal } from 'sequelize'
 import type { ProjectDto } from '../../shared/types.js'
-import { query } from './pool.js'
-
-interface ProjectRow {
-  slug: string
-  name: string | null
-  first_seen_at: Date
-  last_seen_at: Date
-  destination_id: number | null
-  enabled: boolean | null
-  updated_at: Date | null
-}
+import { Route, SentryProject } from './models.js'
 
 /**
- * Auto-learning: called for every issue we see, from either ingest mode, and
- * for every project the Sentry API lists while polling.
+ * Auto-learning: called for every issue the poller sees, and for every project
+ * the Sentry API lists. `name` is left out of the payload when we do not have
+ * one, so an upsert never overwrites a known name with null.
  */
 export async function upsertProject(slug: string, name?: string | null): Promise<void> {
-  await query(
-    `insert into sentry_projects (slug, name)
-     values ($1, $2)
-     on conflict (slug) do update
-        set last_seen_at = now(),
-            name = coalesce(excluded.name, sentry_projects.name)`,
-    [slug, name ?? null],
-  )
+  await SentryProject.upsert({
+    slug,
+    lastSeenAt: new Date(),
+    ...(name == null ? {} : { name }),
+  })
 }
 
 export async function listProjects(): Promise<ProjectDto[]> {
-  const { rows } = await query<ProjectRow>(`
-    select p.slug, p.name, p.first_seen_at, p.last_seen_at,
-           r.destination_id, r.enabled, r.updated_at
-      from sentry_projects p
-      left join routes r on r.project_slug = p.slug
-     order by (r.destination_id is null) desc, p.slug
-  `)
+  const projects = await SentryProject.findAll({
+    include: [{ model: Route, as: 'route', required: false }],
+    // Unrouted projects first, so the ones needing attention are at the top.
+    order: [literal('"route"."destination_id" is null desc'), ['slug', 'ASC']],
+  })
 
-  return rows.map((row) => ({
-    slug: row.slug,
-    name: row.name,
-    firstSeenAt: row.first_seen_at.toISOString(),
-    lastSeenAt: row.last_seen_at.toISOString(),
-    route:
-      row.destination_id === null
-        ? null
-        : {
-            destinationId: row.destination_id,
-            enabled: row.enabled ?? false,
-            updatedAt: (row.updated_at ?? row.last_seen_at).toISOString(),
-          },
+  return projects.map((project) => ({
+    slug: project.slug,
+    name: project.name,
+    firstSeenAt: project.firstSeenAt.toISOString(),
+    lastSeenAt: project.lastSeenAt.toISOString(),
+    route: project.route
+      ? {
+          destinationId: project.route.destinationId,
+          enabled: project.route.enabled,
+          updatedAt: (project.route.updatedAt ?? project.lastSeenAt).toISOString(),
+        }
+      : null,
   }))
 }

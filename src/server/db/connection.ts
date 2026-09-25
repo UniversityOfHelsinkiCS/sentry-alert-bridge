@@ -5,13 +5,10 @@ import { SequelizeStorage, Umzug } from 'umzug'
 import { config } from '../config.js'
 import { logger } from '../logger.js'
 
-/**
- * Sequelize is here for the migrations only — queries go through the pg pool in
- * pool.ts — so it keeps a small pool of its own.
- */
+/** The one connection to the database: models in models.ts, migrations below. */
 export const sequelize = new Sequelize(config.DATABASE_URL, {
   logging: false,
-  pool: { max: 2 },
+  pool: { max: 10 },
 })
 
 // Migrations run as .ts under tsx in development and as compiled .js from dist
