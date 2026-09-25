@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { NormalizedIssue } from '../../shared/types.js'
-import { formatIssue } from './format.js'
+import type { NormalizedIssue } from '../../../src/shared/types.js'
+import { formatIssue } from '../../../src/server/slack/format.js'
 
 const issue: NormalizedIssue = {
   id: '42',

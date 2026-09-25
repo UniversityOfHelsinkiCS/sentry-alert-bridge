@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken'
 import { describe, expect, it } from 'vitest'
-import { config } from '../config.js'
-import { isValidAccessToken, signSession, verifySession } from './token.js'
+import { config } from '../../../src/server/config.js'
+import { isValidAccessToken, signSession, verifySession } from '../../../src/server/auth/token.js'
 
 describe('access token', () => {
   it('accepts the configured token', () => {

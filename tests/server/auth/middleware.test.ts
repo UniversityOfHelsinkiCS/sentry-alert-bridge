@@ -5,7 +5,7 @@ import {
   loginRateLimit,
   recordLoginFailure,
   resetLoginLimiter,
-} from './middleware.js'
+} from '../../../src/server/auth/middleware.js'
 
 const LOCKDOWN_MS = 15 * 60 * 1000
 

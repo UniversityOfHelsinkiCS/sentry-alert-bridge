@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hintFor } from './urlHint.js'
+import { hintFor } from '../../../src/server/crypto/urlHint.js'
 
 const URL = ['https://example.invalid', 'part-a', 'part-b', 'secretvalue5678'].join('/')
 
