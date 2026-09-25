@@ -4,12 +4,15 @@ export interface Route {
   projectSlug: string
   destinationId: number
   enabled: boolean
+  /** Events before this are history and never alert. Set when the route is made. */
+  alertsFrom: Date
 }
 
 const toRoute = (row: RouteModel): Route => ({
   projectSlug: row.projectSlug,
   destinationId: row.destinationId,
   enabled: row.enabled,
+  alertsFrom: row.alertsFrom,
 })
 
 export async function getRoute(projectSlug: string): Promise<Route | null> {

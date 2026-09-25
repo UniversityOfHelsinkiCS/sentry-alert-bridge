@@ -4,6 +4,7 @@ import type {
   DestinationDto,
   MeDto,
   ProjectDto,
+  ProjectIssuesDto,
   SettingsDto,
 } from '../shared/types'
 
@@ -48,6 +49,8 @@ export const api = {
   logout: () => request<{ ok: true }>('/logout', { method: 'POST' }),
 
   projects: () => request<ProjectDto[]>('/projects'),
+  projectIssues: (slug: string) =>
+    request<ProjectIssuesDto>(`/projects/${encodeURIComponent(slug)}/issues`),
   addProject: (slug: string) =>
     request<ProjectDto[]>('/projects', { method: 'POST', ...body({ slug }) }),
   setRoute: (slug: string, destinationId: number, enabled: boolean) =>

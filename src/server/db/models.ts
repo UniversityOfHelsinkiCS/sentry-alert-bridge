@@ -65,6 +65,8 @@ export class Route extends Model<InferAttributes<Route>, InferCreationAttributes
   declare destinationId: number
   declare enabled: CreationOptional<boolean>
   declare updatedAt: CreationOptional<Date>
+  /** Only events after this can alert, so routing replays no history. */
+  declare alertsFrom: CreationOptional<Date>
 }
 
 Route.init(
@@ -73,6 +75,7 @@ Route.init(
     destinationId: { type: DataTypes.INTEGER, allowNull: false },
     enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    alertsFrom: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   },
   { ...common, tableName: 'routes' },
 )
@@ -99,6 +102,10 @@ export class SeenIssue extends Model<
   declare projectSlug: string
   declare issueId: string
   declare seenAt: CreationOptional<Date>
+  /** Null while claimed; set when the issue is resolved from Slack. */
+  declare releasedAt: CreationOptional<Date | null>
+  /** When this app last alerted on the issue; the cooldown runs from here. */
+  declare alertedAt: CreationOptional<Date | null>
 }
 
 SeenIssue.init(
@@ -106,6 +113,8 @@ SeenIssue.init(
     projectSlug: { type: DataTypes.TEXT, primaryKey: true },
     issueId: { type: DataTypes.TEXT, primaryKey: true },
     seenAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    releasedAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
+    alertedAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
   },
   { ...common, tableName: 'seen_issues' },
 )

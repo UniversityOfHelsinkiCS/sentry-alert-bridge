@@ -25,6 +25,35 @@ export interface DestinationDto {
   lastDeliveryAt: string | null
 }
 
+/** Why the poller would or would not alert on an issue, for the debug view. */
+export type IssueVerdict =
+  | 'alert'
+  | 'before-start'
+  | 'no-new-events'
+  | 'in-cooldown'
+  | 'unknown'
+
+export interface ProjectIssueDto {
+  id: string
+  title: string
+  shortId: string | null
+  level: string | null
+  url: string | null
+  firstSeen: string | null
+  lastSeen: string | null
+  /** When this app last alerted on it; null means never. */
+  alertedAt: string | null
+  verdict: IssueVerdict
+}
+
+export interface ProjectIssuesDto {
+  projectSlug: string
+  /** The route's start time: events before it are history and never alert. */
+  alertsFrom: string
+  cooldownMinutes: number
+  issues: ProjectIssueDto[]
+}
+
 export interface ProjectDto {
   slug: string
   name: string | null

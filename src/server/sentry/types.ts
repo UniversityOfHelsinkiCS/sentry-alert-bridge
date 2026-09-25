@@ -15,6 +15,7 @@ export const apiIssueSchema = z
     permalink: z.string().nullish(),
     count: z.union([z.string(), z.number()]).nullish(),
     firstSeen: z.string().nullish(),
+    lastSeen: z.string().nullish(),
   })
   .passthrough()
 

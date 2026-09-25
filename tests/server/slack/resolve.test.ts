@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const resolveIssue = vi.hoisted(() => vi.fn())
-const releaseIssue = vi.hoisted(() => vi.fn())
+const markIssueResolved = vi.hoisted(() => vi.fn())
 const recordDelivery = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../src/server/sentry/api.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/server/sentry/api.js')>()
   return { ...actual, resolveIssue }
 })
-vi.mock('../../../src/server/db/seenIssues.js', () => ({ releaseIssue, claimIssue: vi.fn() }))
+vi.mock('../../../src/server/db/seenIssues.js', () => ({ markIssueResolved }))
 vi.mock('../../../src/server/db/deliveries.js', () => ({ recordDelivery }))
 
 const { SentryApiError } = await import('../../../src/server/sentry/api.js')
@@ -40,7 +40,7 @@ describe('handleResolveClick', () => {
     await handleResolveClick(click)
 
     expect(resolveIssue).toHaveBeenCalledWith('42')
-    expect(releaseIssue).toHaveBeenCalledWith('backend', '42')
+    expect(markIssueResolved).toHaveBeenCalledWith('backend', '42')
   })
 
   it('replaces the message and drops the button', async () => {
@@ -64,7 +64,7 @@ describe('handleResolveClick', () => {
 
     await handleResolveClick(click)
 
-    expect(releaseIssue).not.toHaveBeenCalled()
+    expect(markIssueResolved).not.toHaveBeenCalled()
   })
 
   it('leaves the button in place and explains a missing scope', async () => {

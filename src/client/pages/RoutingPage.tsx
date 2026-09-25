@@ -2,6 +2,9 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import Collapse from '@mui/material/Collapse'
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
 import MenuItem from '@mui/material/MenuItem'
 import Paper from '@mui/material/Paper'
 import Select from '@mui/material/Select'
@@ -15,13 +18,142 @@ import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { useState, type FormEvent } from 'react'
+import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import type { ProjectDto } from '../../shared/types'
+import type { IssueVerdict, ProjectDto, ProjectIssuesDto } from '../../shared/types'
 import { api, useApi } from '../api'
 import { errorMessage, useToast } from '../useToast'
 
 const UNROUTED = ''
+
+const VERDICTS: Record<
+  IssueVerdict,
+  { label: string; color: 'success' | 'default' | 'warning'; why: string }
+> = {
+  alert: {
+    label: 'would alert',
+    color: 'success',
+    why: 'Seen again since the last alert, and out of cooldown.',
+  },
+  'before-start': {
+    label: 'before start',
+    color: 'default',
+    why: 'Its last event predates this route’s start time, so it counts as history.',
+  },
+  'no-new-events': {
+    label: 'nothing new',
+    color: 'default',
+    why: 'Not seen again since this app last alerted on it.',
+  },
+  'in-cooldown': {
+    label: 'in cooldown',
+    color: 'warning',
+    why: 'It has fired again, but too soon after the last alert.',
+  },
+  unknown: {
+    label: 'no last seen',
+    color: 'warning',
+    why: 'Sentry returned no usable lastSeen, so there is nothing to compare.',
+  },
+}
+
+/**
+ * What the poller sees for one project, straight from Sentry, with the reason
+ * each issue would or would not produce an alert. This is the answer to "I made
+ * an error and nothing arrived".
+ */
+function IssueDebugPanel({ slug }: { slug: string }) {
+  const [state, setState] = useState<ProjectIssuesDto | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    setState(null)
+    setError(null)
+    api
+      .projectIssues(slug)
+      .then((data) => live && setState(data))
+      .catch((err) => live && setError(errorMessage(err)))
+    return () => {
+      live = false
+    }
+  }, [slug])
+
+  if (error) return <Alert severity="error">{error}</Alert>
+  if (!state) return <Skeleton variant="rectangular" height={80} />
+
+  return (
+    <Box sx={{ p: 2 }}>
+      <Typography variant="caption" color="text.secondary" component="div">
+        What Sentry returns for <code>is:unresolved</code>. An issue alerts when it has been seen
+        again since the last alert. Events before{' '}
+        <strong>{new Date(state.alertsFrom).toLocaleString()}</strong> are history and never
+        alert, and after an alert an issue stays quiet for {state.cooldownMinutes} min.
+      </Typography>
+
+      {state.issues.length === 0 ? (
+        <Typography variant="body2" sx={{ mt: 1 }}>
+          Sentry returned no unresolved issues for this project.
+        </Typography>
+      ) : (
+        <Table size="small" sx={{ mt: 1 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Issue</TableCell>
+              <TableCell>First seen</TableCell>
+              <TableCell>Last seen</TableCell>
+              <TableCell>Last alerted</TableCell>
+              <TableCell align="right">Verdict</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {state.issues.map((issue) => (
+              <TableRow key={issue.id}>
+                <TableCell>
+                  <Typography variant="body2">
+                    {issue.url ? (
+                      <a href={issue.url} target="_blank" rel="noreferrer">
+                        {issue.title}
+                      </a>
+                    ) : (
+                      issue.title
+                    )}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {issue.shortId ?? issue.id}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="caption">
+                    {issue.firstSeen ? new Date(issue.firstSeen).toLocaleString() : '—'}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="caption">
+                    {issue.lastSeen ? new Date(issue.lastSeen).toLocaleString() : '—'}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="caption">
+                    {issue.alertedAt ? new Date(issue.alertedAt).toLocaleString() : 'never'}
+                  </Typography>
+                </TableCell>
+                <TableCell align="right">
+                  <Chip
+                    size="small"
+                    label={VERDICTS[issue.verdict].label}
+                    color={VERDICTS[issue.verdict].color}
+                    title={VERDICTS[issue.verdict].why}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Box>
+  )
+}
 
 export default function RoutingPage() {
   const projects = useApi(() => api.projects(), [])
@@ -29,6 +161,7 @@ export default function RoutingPage() {
   const { show, toast } = useToast()
   const [newSlug, setNewSlug] = useState('')
   const [params] = useSearchParams()
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   // Deliveries page deep-links here with ?project=<slug> to highlight a row.
   const highlight = params.get('project')
@@ -88,6 +221,7 @@ export default function RoutingPage() {
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell width={120} />
               <TableCell>Project</TableCell>
               <TableCell width="30%">Destination</TableCell>
               <TableCell align="center">Enabled</TableCell>
@@ -97,7 +231,7 @@ export default function RoutingPage() {
           <TableBody>
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4}>
+                <TableCell colSpan={5}>
                   <Typography variant="body2" color="text.secondary">
                     No projects known yet.
                   </Typography>
@@ -106,11 +240,34 @@ export default function RoutingPage() {
             )}
 
             {rows.map((project) => (
+              <Fragment key={project.slug}>
               <TableRow
-                key={project.slug}
                 selected={project.slug === highlight}
                 hover
               >
+                <TableCell>
+                  {/* Only routed projects are polled, so only they have
+                      anything to explain. */}
+                  {project.route && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={
+                        expanded === project.slug ? (
+                          <KeyboardArrowDownIcon fontSize="small" />
+                        ) : (
+                          <KeyboardArrowRightIcon fontSize="small" />
+                        )
+                      }
+                      onClick={() =>
+                        setExpanded(expanded === project.slug ? null : project.slug)
+                      }
+                    >
+                      Debug
+                    </Button>
+                  )}
+                </TableCell>
+
                 <TableCell>
                   <Stack direction="row" spacing={1} alignItems="center">
                     <Typography variant="body2">{project.name ?? project.slug}</Typography>
@@ -165,6 +322,15 @@ export default function RoutingPage() {
                   </Typography>
                 </TableCell>
               </TableRow>
+
+              <TableRow>
+                <TableCell colSpan={5} sx={{ py: 0, border: 0 }}>
+                  <Collapse in={expanded === project.slug} unmountOnExit>
+                    <IssueDebugPanel slug={project.slug} />
+                  </Collapse>
+                </TableCell>
+              </TableRow>
+              </Fragment>
             ))}
           </TableBody>
         </Table>

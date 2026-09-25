@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import type { SettingsDto } from '../../shared/types.js'
+import type { ProjectIssuesDto, SettingsDto } from '../../shared/types.js'
 import { requireAuth } from '../auth/middleware.js'
 import { config } from '../config.js'
 import { countRoutesUsing, listDeliveries, recordDelivery } from '../db/deliveries.js'
@@ -12,9 +12,12 @@ import {
   listDestinations,
 } from '../db/destinations.js'
 import { listProjects, upsertProject } from '../db/projects.js'
-import { deleteRoute, upsertRoute } from '../db/routes.js'
+import { deleteRoute, getRoute, upsertRoute } from '../db/routes.js'
+import { listClaimStates } from '../db/seenIssues.js'
 import { getSettings } from '../db/settings.js'
+import { decideAlert } from '../ingest/decide.js'
 import { pollNow } from '../ingest/poller.js'
+import { listNewIssues, normalizeApiIssue } from '../sentry/api.js'
 import { sendToSlack } from '../slack/client.js'
 import { formatIssue, testIssue } from '../slack/format.js'
 
@@ -30,6 +33,60 @@ const slugSchema = z
 
 apiRouter.get('/projects', async (_req, res) => {
   res.json(await listProjects())
+})
+
+/**
+ * What the poller would do with this project right now, issue by issue. It
+ * calls Sentry with the same query the poller uses and applies the same window,
+ * so "why did nothing alert?" has an answer that does not involve reading logs.
+ */
+apiRouter.get('/projects/:slug/issues', async (req, res) => {
+  const parsed = slugSchema.safeParse(req.params.slug)
+  if (!parsed.success) {
+    res.status(400).json({ error: 'not a valid project slug' })
+    return
+  }
+  const projectSlug = parsed.data
+
+  const route = await getRoute(projectSlug)
+  if (!route) {
+    res.status(404).json({ error: 'project is not routed, so it is never polled' })
+    return
+  }
+
+  const [issues, states] = await Promise.all([
+    listNewIssues(projectSlug),
+    listClaimStates(projectSlug),
+  ])
+
+  const body: ProjectIssuesDto = {
+    projectSlug,
+    alertsFrom: route.alertsFrom.toISOString(),
+    cooldownMinutes: config.ALERT_COOLDOWN_MINUTES,
+    issues: issues.map((issue) => {
+      const normalized = normalizeApiIssue(issue, projectSlug, null)
+      const state = states.get(issue.id)
+
+      return {
+        id: issue.id,
+        title: normalized.title,
+        shortId: normalized.shortId ?? null,
+        level: normalized.level ?? null,
+        url: normalized.url ?? null,
+        firstSeen: issue.firstSeen ?? null,
+        lastSeen: issue.lastSeen ?? null,
+        alertedAt: state?.alertedAt?.toISOString() ?? null,
+        // The poller's own rule, not a second copy of it.
+        verdict: decideAlert({
+          lastSeen: issue.lastSeen,
+          alertsFrom: route.alertsFrom,
+          state,
+        }),
+      }
+    }),
+  }
+
+  res.json(body)
 })
 
 apiRouter.post('/projects', async (req, res) => {

@@ -1,5 +1,5 @@
 import { recordDelivery } from '../db/deliveries.js'
-import { releaseIssue } from '../db/seenIssues.js'
+import { markIssueResolved } from '../db/seenIssues.js'
 import { logger } from '../logger.js'
 import { SentryApiError, resolveIssue } from '../sentry/api.js'
 import { markResolved } from './format.js'
@@ -48,7 +48,7 @@ export async function handleResolveClick(click: ResolveClick): Promise<void> {
 
   // Letting go of the claim is the whole point: it is what allows a later
   // regression of this issue to alert again instead of being deduplicated.
-  await releaseIssue(projectSlug, issueId)
+  await markIssueResolved(projectSlug, issueId)
 
   await postToResponseUrl(responseUrl, {
     text: 'Issue resolved in Sentry',

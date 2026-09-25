@@ -3,24 +3,24 @@ import { recordDelivery } from '../db/deliveries.js'
 import { getWebhookUrl } from '../db/destinations.js'
 import { upsertProject } from '../db/projects.js'
 import { getRoute } from '../db/routes.js'
-import { claimIssue, releaseIssue } from '../db/seenIssues.js'
+import { recordAlert } from '../db/seenIssues.js'
 import { logger } from '../logger.js'
 import { sendToSlack } from '../slack/client.js'
 import { formatIssue } from '../slack/format.js'
 
-export type IngestResult = 'sent' | 'unrouted' | 'duplicate' | 'failed'
+export type IngestResult = 'sent' | 'unrouted' | 'failed'
 
-/** The single path every polled issue takes: route, dedup, format, send, log. */
+/**
+ * The single path every alertable issue takes: route, format, send, log.
+ *
+ * Whether an issue deserves an alert at all is decided before this, in
+ * decide.ts — the caller only brings issues that passed.
+ */
 export async function handleIssue(
   issue: NormalizedIssue,
   source: IngestSource,
 ): Promise<IngestResult> {
   await upsertProject(issue.projectSlug, issue.projectName)
-
-  if (!(await claimIssue(issue.projectSlug, issue.id))) {
-    logger.debug({ issueId: issue.id, source }, 'issue already seen, skipping')
-    return 'duplicate'
-  }
 
   const route = await getRoute(issue.projectSlug)
   if (!route || !route.enabled) {
@@ -51,6 +51,10 @@ export async function handleIssue(
 
   try {
     await sendToSlack(webhookUrl, formatIssue(issue, { resolvable: true }))
+
+    // Only now, so a failed send is simply tried again on the next tick.
+    await recordAlert(issue.projectSlug, issue.id)
+
     await recordDelivery({
       source,
       projectSlug: issue.projectSlug,
@@ -61,10 +65,8 @@ export async function handleIssue(
     })
     return 'sent'
   } catch (err) {
-    // Give up the claim so a transient Slack failure gets another chance on the
-    // next poll instead of being silently dropped.
-    await releaseIssue(issue.projectSlug, issue.id)
-
+    // Nothing to undo: the alert was never recorded, so the next tick will
+    // find the issue unalerted and try again.
     const detail = err instanceof Error ? err.message : 'unknown slack error'
     logger.error({ err, projectSlug: issue.projectSlug }, 'slack delivery failed')
     await recordDelivery({

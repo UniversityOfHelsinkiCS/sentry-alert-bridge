@@ -21,6 +21,9 @@ const schema = z.object({
   // nothing the app can do.
   SENTRY_AUTH_TOKEN: z.string().min(1, 'SENTRY_AUTH_TOKEN is required'),
   POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(5),
+  // How long one issue stays quiet after alerting, however often it fires.
+  // 0 means "alert on every poll that sees new events".
+  ALERT_COOLDOWN_MINUTES: z.coerce.number().int().min(0).max(1440).default(60),
 
   // Socket Mode app-level token, for the Resolve button in Slack alerts.
   // Optional: without it the app behaves exactly as before, minus the button.
@@ -48,6 +51,7 @@ type Env = z.infer<typeof schema>
 export interface Config extends Env {
   isProduction: boolean
   pollIntervalMs: number
+  alertCooldownMs: number
 }
 
 /**
@@ -78,6 +82,7 @@ function parse(): Config {
     ...env,
     isProduction: env.NODE_ENV === 'production',
     pollIntervalMs: env.POLL_INTERVAL_MINUTES * 60_000,
+    alertCooldownMs: env.ALERT_COOLDOWN_MINUTES * 60_000,
   }
 }
 

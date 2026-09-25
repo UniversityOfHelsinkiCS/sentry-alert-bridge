@@ -2,7 +2,9 @@ import { config } from '../config.js'
 import { recordDelivery } from '../db/deliveries.js'
 import { upsertProject } from '../db/projects.js'
 import { listEnabledRoutes } from '../db/routes.js'
+import { listClaimStates } from '../db/seenIssues.js'
 import { touchLastPoll } from '../db/settings.js'
+import { decideAlert } from './decide.js'
 import { logger } from '../logger.js'
 import {
   listNewIssues,
@@ -22,16 +24,19 @@ export interface PollSummary {
   polled: number
   sent: number
   unrouted: number
-  duplicates: number
+  /** Seen but not alertable: history, nothing new, or still in cooldown. */
+  skipped: number
   failed: number
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+
 /**
- * One poll tick. Issues first seen within two intervals are candidates — the
- * overlap means a slow or skipped tick loses nothing, and seen_issues absorbs
- * the repeats. It is also what stops a backlog flood on first enable.
+ * One poll tick. An issue alerts when it has been seen since the last time this
+ * app alerted on it — see decide.ts for the full rule. The route's alerts_from
+ * keeps history out, and the cooldown keeps a constantly-failing issue from
+ * filling the channel.
  */
 export async function pollOnce(): Promise<PollSummary> {
   const summary: PollSummary = {
@@ -39,7 +44,7 @@ export async function pollOnce(): Promise<PollSummary> {
     polled: 0,
     sent: 0,
     unrouted: 0,
-    duplicates: 0,
+    skipped: 0,
     failed: 0,
   }
 
@@ -64,17 +69,29 @@ export async function pollOnce(): Promise<PollSummary> {
     }
   }
 
-  const cutoff = Date.now() - 2 * config.pollIntervalMs
-
   // Only projects someone has actually routed are worth an API call.
   for (const route of await listEnabledRoutes()) {
     try {
       const issues = await listNewIssues(route.projectSlug)
       summary.polled++
 
+      const states = await listClaimStates(route.projectSlug)
+
       for (const issue of issues) {
-        const firstSeen = issue.firstSeen ? Date.parse(issue.firstSeen) : Number.NaN
-        if (Number.isNaN(firstSeen) || firstSeen < cutoff) continue
+        const decision = decideAlert({
+          lastSeen: issue.lastSeen,
+          alertsFrom: route.alertsFrom,
+          state: states.get(issue.id),
+        })
+
+        if (decision !== 'alert') {
+          summary.skipped++
+          logger.debug(
+            { projectSlug: route.projectSlug, issueId: issue.id, decision },
+            'issue not alertable',
+          )
+          continue
+        }
 
         const result = await handleIssue(
           normalizeApiIssue(issue, route.projectSlug, names.get(route.projectSlug) ?? null),
@@ -82,7 +99,6 @@ export async function pollOnce(): Promise<PollSummary> {
         )
         if (result === 'sent') summary.sent++
         else if (result === 'unrouted') summary.unrouted++
-        else if (result === 'duplicate') summary.duplicates++
         else summary.failed++
       }
     } catch (err) {
