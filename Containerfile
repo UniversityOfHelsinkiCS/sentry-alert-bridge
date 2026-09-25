@@ -50,8 +50,8 @@ COPY .npmrc ./
 COPY package* ./
 RUN npm ci --omit-dev --ignore-scripts --no-audit --no-fund
 
+# Migrations are TypeScript now, so they are inside dist/server/db/migrations.
 COPY --from=builder /opt/app-root/src/dist ./dist
-COPY migrations ./migrations
 
 EXPOSE 8000
 

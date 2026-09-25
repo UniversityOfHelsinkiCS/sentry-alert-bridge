@@ -1,5 +1,5 @@
 import { config } from './config.js'
-import { migrate } from './db/migrate.js'
+import { closeDatabase, connectToDatabase } from './db/connection.js'
 import { pool } from './db/pool.js'
 import { seedIngestMode } from './db/settings.js'
 import { initIngestMode } from './ingest/mode.js'
@@ -8,7 +8,7 @@ import { logger } from './logger.js'
 import { createApp } from './server.js'
 
 async function main(): Promise<void> {
-  await migrate()
+  await connectToDatabase()
   await seedIngestMode()
 
   const mode = await initIngestMode()
@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'shutting down')
     stopPoller()
     server.close(() => {
-      void pool.end().then(() => process.exit(0))
+      void Promise.all([pool.end(), closeDatabase()]).then(() => process.exit(0))
     })
     // Do not hang forever on a stuck connection.
     setTimeout(() => process.exit(1), 10_000).unref()
