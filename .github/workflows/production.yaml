@@ -1,0 +1,35 @@
+name: Deploy to production
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        id: build-image
+        uses: redhat-actions/buildah-build@v2
+        with:
+          image: sentry-alert-bridge
+          tags: production ${{ github.sha }}
+          containerfiles: |
+            ./Containerfile
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            IMAGE_SHA=${{ github.sha }}
+            RELEASE_VERSION=${{ github.event.release.tag_name }}
+            STAGING=false
+
+      - name: Push to registry.version.helsinki.fi
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build-image.outputs.image }}
+          tags: ${{ steps.build-image.outputs.tags }}
+          registry: registry.version.helsinki.fi/toska/openshift/kontit/
+          username: kontit
+          password: ${{ secrets.VERSION_PUSH_SECRET }}
