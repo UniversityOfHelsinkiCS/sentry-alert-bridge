@@ -1,10 +1,8 @@
-export type IngestMode = 'webhook' | 'polling'
+export type DeliveryOutcome = 'sent' | 'unrouted' | 'failed'
 
-export type DeliveryOutcome = 'sent' | 'unrouted' | 'skipped' | 'failed'
+export type IngestSource = 'polling' | 'test'
 
-export type IngestSource = 'webhook' | 'polling' | 'test'
-
-/** The one issue shape both the webhook parser and the Sentry API client produce. */
+/** The issue shape the Sentry API client produces. */
 export interface NormalizedIssue {
   id: string
   title: string
@@ -49,12 +47,8 @@ export interface DeliveryDto {
 }
 
 export interface SettingsDto {
-  ingestMode: IngestMode
   pollIntervalMinutes: number
   lastPollAt: string | null
-  webhookPath: string
-  pollingAvailable: boolean
-  webhookAvailable: boolean
 }
 
 export interface MeDto {

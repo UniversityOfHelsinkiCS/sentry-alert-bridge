@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import type { SettingsDto } from '../../shared/types.js'
 import { requireAuth } from '../auth/middleware.js'
-import { config, missingVarsFor } from '../config.js'
+import { config } from '../config.js'
 import { countRoutesUsing, listDeliveries, recordDelivery } from '../db/deliveries.js'
 import {
   createDestination,
@@ -13,13 +13,10 @@ import {
 } from '../db/destinations.js'
 import { listProjects, upsertProject } from '../db/projects.js'
 import { deleteRoute, upsertRoute } from '../db/routes.js'
-import { getSettings, setIngestMode } from '../db/settings.js'
-import { applyIngestMode } from '../ingest/mode.js'
+import { getSettings } from '../db/settings.js'
 import { pollNow } from '../ingest/poller.js'
-import { logger } from '../logger.js'
 import { sendToSlack } from '../slack/client.js'
 import { formatIssue, testIssue } from '../slack/format.js'
-import { WEBHOOK_PATH } from './webhook.js'
 
 export const apiRouter: Router = Router()
 
@@ -158,50 +155,16 @@ apiRouter.get('/deliveries', async (req, res) => {
   res.json(await listDeliveries(limit))
 })
 
-async function settingsDto(): Promise<SettingsDto> {
+apiRouter.get('/settings', async (_req, res) => {
   const settings = await getSettings()
-  return {
-    ingestMode: settings.ingestMode,
+  const dto: SettingsDto = {
     pollIntervalMinutes: config.POLL_INTERVAL_MINUTES,
     lastPollAt: settings.lastPollAt?.toISOString() ?? null,
-    webhookPath: WEBHOOK_PATH,
-    pollingAvailable: missingVarsFor('polling').length === 0,
-    webhookAvailable: missingVarsFor('webhook').length === 0,
   }
-}
-
-apiRouter.get('/settings', async (_req, res) => {
-  res.json(await settingsDto())
-})
-
-apiRouter.put('/settings', async (req, res) => {
-  const parsed = z.object({ ingestMode: z.enum(['webhook', 'polling']) }).safeParse(req.body)
-  if (!parsed.success) {
-    res.status(400).json({ error: 'ingestMode must be "webhook" or "polling"' })
-    return
-  }
-
-  const missing = missingVarsFor(parsed.data.ingestMode)
-  if (missing.length > 0) {
-    res.status(400).json({
-      error: `${parsed.data.ingestMode} mode needs ${missing.join(', ')} to be set`,
-    })
-    return
-  }
-
-  await setIngestMode(parsed.data.ingestMode)
-  await applyIngestMode(parsed.data.ingestMode)
-  logger.info({ ingestMode: parsed.data.ingestMode }, 'ingest mode changed')
-  res.json(await settingsDto())
+  res.json(dto)
 })
 
 apiRouter.post('/poll', async (_req, res) => {
-  const { ingestMode } = await getSettings()
-  if (ingestMode !== 'polling') {
-    res.status(400).json({ error: 'the app is in webhook mode' })
-    return
-  }
-
   try {
     res.json(await pollNow())
   } catch (err) {

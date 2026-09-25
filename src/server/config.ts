@@ -1,6 +1,5 @@
 import 'dotenv/config'
 import { z } from 'zod'
-import type { IngestMode } from '../shared/types.js'
 
 /**
  * The only module in the app that reads process.env. Everything else imports
@@ -18,10 +17,10 @@ const schema = z.object({
 
   SENTRY_BASE_URL: z.string().url().default('https://toska.it.helsinki.fi'),
   SENTRY_ORG_SLUG: z.string().min(1).default('sentry'),
-  SENTRY_AUTH_TOKEN: z.string().min(1).optional(),
-  SENTRY_CLIENT_SECRET: z.string().min(1).optional(),
+  // Polling is the only way issues reach the app, so without this there is
+  // nothing the app can do.
+  SENTRY_AUTH_TOKEN: z.string().min(1, 'SENTRY_AUTH_TOKEN is required'),
   POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(5),
-  INGEST_MODE_DEFAULT: z.enum(['webhook', 'polling']).default('polling'),
 
   ACCESS_TOKEN: z
     .string()
@@ -71,29 +70,11 @@ function parse(): Config {
 
   const env = parsed.data
 
-  // The default mode must be usable, otherwise the app boots into a mode it
-  // cannot run. Non-default modes are checked when they are switched on.
-  const missing = missingVarsFor(env.INGEST_MODE_DEFAULT, env)
-  if (missing.length > 0) {
-    throw new Error(
-      `Invalid environment:\n  INGEST_MODE_DEFAULT=${env.INGEST_MODE_DEFAULT} requires ${missing.join(', ')}`,
-    )
-  }
-
   return {
     ...env,
     isProduction: env.NODE_ENV === 'production',
     pollIntervalMs: env.POLL_INTERVAL_MINUTES * 60_000,
   }
-}
-
-/** Which env vars a given ingest mode needs but does not have. */
-export function missingVarsFor(
-  mode: IngestMode,
-  env: Pick<Env, 'SENTRY_AUTH_TOKEN' | 'SENTRY_CLIENT_SECRET'> = config,
-): string[] {
-  if (mode === 'polling') return env.SENTRY_AUTH_TOKEN ? [] : ['SENTRY_AUTH_TOKEN']
-  return env.SENTRY_CLIENT_SECRET ? [] : ['SENTRY_CLIENT_SECRET']
 }
 
 export const config: Config = Object.freeze(parse())

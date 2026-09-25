@@ -69,8 +69,6 @@ export const api = {
   deliveries: (limit = 100) => request<DeliveryDto[]>(`/deliveries?limit=${limit}`),
 
   settings: () => request<SettingsDto>('/settings'),
-  setIngestMode: (ingestMode: SettingsDto['ingestMode']) =>
-    request<SettingsDto>('/settings', { method: 'PUT', ...body({ ingestMode }) }),
   pollNow: () => request<Record<string, number>>('/poll', { method: 'POST' }),
 }
 

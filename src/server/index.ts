@@ -1,18 +1,14 @@
 import { config } from './config.js'
 import { closeDatabase, connectToDatabase } from './db/connection.js'
 import { pool } from './db/pool.js'
-import { seedIngestMode } from './db/settings.js'
-import { initIngestMode } from './ingest/mode.js'
-import { stopPoller } from './ingest/poller.js'
+import { startPoller, stopPoller } from './ingest/poller.js'
 import { logger } from './logger.js'
 import { createApp } from './server.js'
 
 async function main(): Promise<void> {
   await connectToDatabase()
-  await seedIngestMode()
 
-  const mode = await initIngestMode()
-  logger.info({ ingestMode: mode }, 'ingest mode ready')
+  startPoller()
 
   const server = createApp().listen(config.PORT, () => {
     logger.info(

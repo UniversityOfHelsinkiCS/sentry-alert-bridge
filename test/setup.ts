@@ -5,7 +5,6 @@ process.env.DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/sentry_a
 process.env.ACCESS_TOKEN = 'a'.repeat(64)
 process.env.JWT_SECRET = 'b'.repeat(64)
 process.env.SENTRY_AUTH_TOKEN = 'sentry-token'
-process.env.SENTRY_CLIENT_SECRET = 'sentry-client-secret'
 process.env.SENTRY_ORG_SLUG = 'sentry'
 process.env.SENTRY_BASE_URL = 'https://toska.it.helsinki.fi'
 process.env.POLL_INTERVAL_MINUTES = '5'

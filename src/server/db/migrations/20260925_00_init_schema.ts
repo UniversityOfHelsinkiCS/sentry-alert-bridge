@@ -57,11 +57,7 @@ export const up: Migration = async ({ context: queryInterface }) => {
       'settings',
       {
         id: { type: DataTypes.INTEGER, primaryKey: true, defaultValue: 1 },
-        ingest_mode: { type: DataTypes.TEXT, allowNull: false, defaultValue: 'polling' },
         last_poll_at: { type: DataTypes.DATE, allowNull: true },
-        // false until INGEST_MODE_DEFAULT has been applied once; after that the
-        // UI owns ingest_mode and the env var is ignored.
-        seeded: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
         updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: literal('now()') },
       },
       { transaction },
@@ -73,14 +69,6 @@ export const up: Migration = async ({ context: queryInterface }) => {
       name: 'settings_single_row',
       fields: ['id'],
       where: { id: 1 },
-      transaction,
-    })
-
-    await queryInterface.addConstraint('settings', {
-      type: 'check',
-      name: 'settings_ingest_mode',
-      fields: ['ingest_mode'],
-      where: { ingest_mode: ['webhook', 'polling'] },
       transaction,
     })
 
@@ -106,7 +94,7 @@ export const up: Migration = async ({ context: queryInterface }) => {
       {
         id: { type: DataTypes.BIGINT, primaryKey: true, autoIncrement: true },
         received_at: { type: DataTypes.DATE, allowNull: false, defaultValue: literal('now()') },
-        source: { type: DataTypes.TEXT, allowNull: false, defaultValue: 'webhook' },
+        source: { type: DataTypes.TEXT, allowNull: false, defaultValue: 'polling' },
         project_slug: { type: DataTypes.TEXT, allowNull: true },
         issue_title: { type: DataTypes.TEXT, allowNull: true },
         issue_url: { type: DataTypes.TEXT, allowNull: true },

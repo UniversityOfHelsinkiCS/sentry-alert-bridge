@@ -10,10 +10,7 @@ import { formatIssue } from '../slack/format.js'
 
 export type IngestResult = 'sent' | 'unrouted' | 'duplicate' | 'failed'
 
-/**
- * The single path every issue takes, whichever ingest mode produced it, so
- * routing, dedup, formatting and the delivery log behave identically in both.
- */
+/** The single path every polled issue takes: route, dedup, format, send, log. */
 export async function handleIssue(
   issue: NormalizedIssue,
   source: IngestSource,

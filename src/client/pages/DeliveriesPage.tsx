@@ -20,7 +20,6 @@ const OUTCOME_COLOR: Record<DeliveryOutcome, 'success' | 'error' | 'default' | '
   sent: 'success',
   failed: 'error',
   unrouted: 'warning',
-  skipped: 'default',
 }
 
 export function OutcomeChip({ outcome }: { outcome: DeliveryOutcome }) {

@@ -22,33 +22,19 @@ migrations and both dev servers come up with that one command; the API is on
 
 ## How it works
 
-Issues can reach the bridge two ways. The mode is global and switched on the
-**Settings** page — no restart.
-
-| Mode | How | Needs |
-| --- | --- | --- |
-| **Polling** (default) | asks the Sentry API for new issues every `POLL_INTERVAL_MINUTES` (5) | `SENTRY_AUTH_TOKEN` |
-| **Webhook** | Sentry pushes each issue as it happens | `SENTRY_CLIENT_SECRET` and a publicly reachable URL |
-
-Both modes go through the same pipeline: learn the project, claim the issue in
-`seen_issues` (this is the dedup, and it is why switching modes cannot
-double-alert), look up the route, format, send, record the delivery.
+The bridge asks the Sentry API for new issues every `POLL_INTERVAL_MINUTES` (5),
+which needs no inbound network access. Each issue goes through one pipeline:
+learn the project, claim the issue in `seen_issues` (the dedup), look up the
+route, format, send, record the delivery.
 
 Polling only asks about projects that have an enabled route, and only alerts on
-issues first seen within the last two intervals — so turning it on does not
+issues first seen within the last two intervals — so a fresh deploy does not
 replay a backlog.
 
 ## Sentry configuration
 
-The internal integration lives at
-<https://toska.it.helsinki.fi/settings/sentry/developer-settings/sentry-alert-bridge-c1b5c5/>
-(org `sentry`). That page has both credentials:
-
-- **Token** → `SENTRY_AUTH_TOKEN` (polling)
-- **Client Secret** → `SENTRY_CLIENT_SECRET` (webhook signature verification)
-
-For webhook mode, paste the URL shown on the Settings page into the integration's
-*Webhook URL* field and tick the **Issue** resource.
+The app reads issues as an internal Sentry integration (org `sentry`, under
+*Settings → Developer Settings*). Copy its **Token** into `SENTRY_AUTH_TOKEN`.
 
 ## Slack configuration
 
@@ -65,7 +51,7 @@ Use **Test** to verify a hook before any real issue arrives.
   still routes there).
 - **Deliveries** — the last 100 issues handled, with outcome and error detail.
   `unrouted` rows link straight to the routing table.
-- **Settings** — ingest mode, poll interval, **Poll now**, webhook URL.
+- **Settings** — poll interval, last poll, **Poll now**.
 
 ## Scripts
 
