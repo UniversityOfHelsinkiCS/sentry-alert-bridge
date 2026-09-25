@@ -3,11 +3,13 @@ import { closeDatabase, connectToDatabase } from './db/connection.js'
 import { startPoller, stopPoller } from './ingest/poller.js'
 import { logger } from './logger.js'
 import { createApp } from './server.js'
+import { startSlackSocket, stopSlackSocket } from './slack/socket.js'
 
 async function main(): Promise<void> {
   await connectToDatabase()
 
   startPoller()
+  startSlackSocket()
 
   const server = createApp().listen(config.PORT, () => {
     logger.info(
@@ -19,6 +21,7 @@ async function main(): Promise<void> {
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'shutting down')
     stopPoller()
+    void stopSlackSocket()
     server.close(() => {
       void closeDatabase().then(() => process.exit(0))
     })

@@ -17,19 +17,32 @@ export class SentryApiError extends Error {
   }
 }
 
-async function get(path: string, search?: Record<string, string>): Promise<unknown> {
+interface RequestOptions {
+  method?: 'GET' | 'PUT'
+  search?: Record<string, string>
+  body?: unknown
+}
+
+async function request(path: string, options: RequestOptions = {}): Promise<unknown> {
   if (!config.SENTRY_AUTH_TOKEN) {
     throw new SentryApiError('SENTRY_AUTH_TOKEN is not set', 0)
   }
 
   const url = new URL(path, config.SENTRY_BASE_URL)
-  for (const [key, value] of Object.entries(search ?? {})) url.searchParams.set(key, value)
+  for (const [key, value] of Object.entries(options.search ?? {})) {
+    url.searchParams.set(key, value)
+  }
+
+  const hasBody = options.body !== undefined
 
   const res = await fetch(url, {
+    method: options.method ?? 'GET',
     headers: {
       Authorization: `Bearer ${config.SENTRY_AUTH_TOKEN}`,
       Accept: 'application/json',
+      ...(hasBody ? { 'content-type': 'application/json' } : {}),
     },
+    body: hasBody ? JSON.stringify(options.body) : undefined,
     signal: AbortSignal.timeout(15_000),
   })
 
@@ -41,7 +54,14 @@ async function get(path: string, search?: Record<string, string>): Promise<unkno
     )
   }
 
+  // A mutation answers 204 with no body, and res.json() would throw on it.
+  if (res.status === 204) return null
+
   return res.json()
+}
+
+async function get(path: string, search?: Record<string, string>): Promise<unknown> {
+  return request(path, { search })
 }
 
 export interface SentryProject {
@@ -64,6 +84,20 @@ export async function listNewIssues(projectSlug: string, limit = 25): Promise<Ap
   const parsed = z.array(apiIssueSchema).safeParse(body)
   if (!parsed.success) throw new SentryApiError('unexpected issue list shape', 0)
   return parsed.data
+}
+
+/**
+ * The org-scoped form rather than the project-scoped bulk mutate: the bulk
+ * endpoint answers 204 having changed nothing when the issue is not in the
+ * project, while this one 404s and says so.
+ *
+ * Needs the event:write scope on SENTRY_AUTH_TOKEN; polling only needs read.
+ */
+export async function resolveIssue(issueId: string): Promise<void> {
+  await request(`/api/0/issues/${encodeURIComponent(issueId)}/`, {
+    method: 'PUT',
+    body: { status: 'resolved' },
+  })
 }
 
 export function normalizeApiIssue(

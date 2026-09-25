@@ -22,6 +22,10 @@ const schema = z.object({
   SENTRY_AUTH_TOKEN: z.string().min(1, 'SENTRY_AUTH_TOKEN is required'),
   POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(5),
 
+  // Socket Mode app-level token, for the Resolve button in Slack alerts.
+  // Optional: without it the app behaves exactly as before, minus the button.
+  SLACK_APP_TOKEN: z.string().startsWith('xapp-').optional(),
+
   ACCESS_TOKEN: z
     .string()
     .min(32, 'ACCESS_TOKEN must be at least 32 characters (openssl rand -hex 32)'),

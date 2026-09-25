@@ -1,6 +1,6 @@
 export type DeliveryOutcome = 'sent' | 'unrouted' | 'failed'
 
-export type IngestSource = 'polling' | 'test'
+export type IngestSource = 'polling' | 'test' | 'resolve'
 
 /** The issue shape the Sentry API client produces. */
 export interface NormalizedIssue {

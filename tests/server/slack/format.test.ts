@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedIssue } from '../../../src/shared/types.js'
-import { formatIssue } from '../../../src/server/slack/format.js'
+import { formatIssue, markResolved } from '../../../src/server/slack/format.js'
+
+interface Block {
+  type?: string
+  elements?: { action_id?: string; value?: string }[]
+}
 
 const issue: NormalizedIssue = {
   id: '42',
@@ -54,5 +59,42 @@ describe('formatIssue', () => {
     const json = JSON.stringify(formatIssue({ ...issue, url: null }).blocks)
     expect(json).toContain(issue.title)
     expect(json).not.toContain('|')
+  })
+
+  it('adds a Resolve button carrying the project and issue when asked', () => {
+    const blocks = formatIssue(issue, { resolvable: true }).blocks as Block[]
+    const actions = blocks.find((b) => b.type === 'actions')
+    expect(actions).toBeDefined()
+
+    const button = actions?.elements?.[0]
+    expect(button?.action_id).toBe('resolve_issue')
+    expect(JSON.parse(button?.value ?? '{}')).toEqual({
+      v: 1,
+      projectSlug: 'backend',
+      issueId: '42',
+    })
+  })
+
+  // The test alert on the destinations page goes through the default, and its
+  // synthetic issue id would fail at Sentry if it ever grew a button.
+  it('has no Resolve button by default', () => {
+    const blocks = formatIssue(issue).blocks as Block[]
+    expect(blocks.find((b) => b.type === 'actions')).toBeUndefined()
+  })
+})
+
+describe('markResolved', () => {
+  it('drops the button and credits the user', () => {
+    const blocks = formatIssue(issue, { resolvable: true }).blocks
+    const updated = markResolved(blocks, 'U123') as Block[]
+
+    expect(updated.find((b) => b.type === 'actions')).toBeUndefined()
+    expect(JSON.stringify(updated)).toContain('<@U123>')
+  })
+
+  it('keeps the rest of the original message intact', () => {
+    const blocks = formatIssue(issue, { resolvable: true }).blocks
+    const updated = markResolved(blocks, 'U123')
+    expect(JSON.stringify(updated)).toContain(issue.title)
   })
 })

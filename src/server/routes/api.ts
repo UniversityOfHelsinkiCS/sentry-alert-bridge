@@ -126,6 +126,8 @@ apiRouter.post('/destinations/:id/test', async (req, res) => {
 
   const issue = testIssue()
   try {
+    // No Resolve button: the test issue is synthetic and Sentry has never heard
+    // of it, so the button could only ever fail.
     await sendToSlack(webhookUrl, formatIssue(issue))
     await recordDelivery({
       source: 'test',

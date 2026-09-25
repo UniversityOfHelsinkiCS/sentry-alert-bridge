@@ -50,7 +50,7 @@ export async function handleIssue(
   }
 
   try {
-    await sendToSlack(webhookUrl, formatIssue(issue))
+    await sendToSlack(webhookUrl, formatIssue(issue, { resolvable: true }))
     await recordDelivery({
       source,
       projectSlug: issue.projectSlug,
