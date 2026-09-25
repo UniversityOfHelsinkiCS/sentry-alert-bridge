@@ -39,10 +39,7 @@ The app reads issues as an internal Sentry integration (org `sentry`, under
 ## Slack configuration
 
 Create an incoming webhook per channel in Slack, then add it under
-**Destinations** with a label like `#backend-alerts`. The URL is stored as-is in
-our own Postgres and never shown again — the UI only renders a masked hint.
-Use **Test** to verify a hook before any real issue arrives.
-
+**Destinations** with a label like `#backend-alerts`.
 ## Pages
 
 - **Routing** — project → destination, with an enable toggle. Unrouted projects
