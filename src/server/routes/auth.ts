@@ -39,7 +39,7 @@ authRouter.post('/login', loginRateLimit, async (req, res) => {
   res.json({ ok: true })
 })
 
-authRouter.post('/logout', (_req, res) => {
+authRouter.post('/logout', requireAuth, (_req, res) => {
   res.clearCookie(SESSION_COOKIE, { ...sessionCookieOptions(), maxAge: undefined })
   res.json({ ok: true })
 })

@@ -8,7 +8,8 @@ const recordDelivery = vi.fn(async () => undefined)
 
 vi.mock('../ingest/index.js', () => ({ handleIssue }))
 vi.mock('../db/deliveries.js', () => ({ recordDelivery }))
-vi.mock('../ingest/mode.js', () => ({ currentIngestMode: () => 'webhook' }))
+let ingestMode: 'webhook' | 'polling' = 'webhook'
+vi.mock('../ingest/mode.js', () => ({ currentIngestMode: () => ingestMode }))
 
 const { webhookRouter, WEBHOOK_PATH } = await import('./webhook.js')
 const { config } = await import('../config.js')
@@ -47,6 +48,7 @@ describe(`POST ${WEBHOOK_PATH}`, () => {
   beforeEach(() => {
     handleIssue.mockClear()
     recordDelivery.mockClear()
+    ingestMode = 'webhook'
   })
 
   it('accepts a correctly signed issue.created and hands it to the pipeline', async () => {
@@ -63,6 +65,25 @@ describe(`POST ${WEBHOOK_PATH}`, () => {
     const res = await post(payload, { signature: 'deadbeef' })
 
     expect(res.status).toBe(401)
+    expect(handleIssue).not.toHaveBeenCalled()
+  })
+
+  it('answers a bad signature with 401 in polling mode too, revealing nothing about the mode', async () => {
+    ingestMode = 'polling'
+
+    const res = await post(payload, { signature: 'deadbeef' })
+
+    expect(res.status).toBe(401)
+    expect(JSON.stringify(res.body)).not.toMatch(/polling|secret/i)
+    expect(handleIssue).not.toHaveBeenCalled()
+  })
+
+  it('answers 503 in polling mode only once the signature is good', async () => {
+    ingestMode = 'polling'
+
+    const res = await post(payload)
+
+    expect(res.status).toBe(503)
     expect(handleIssue).not.toHaveBeenCalled()
   })
 

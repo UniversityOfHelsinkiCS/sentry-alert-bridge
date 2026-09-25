@@ -17,7 +17,6 @@ export default defineConfig({
     hmr: { host: 'localhost', port: 3000 },
     proxy: {
       '/api': { target: apiTarget, changeOrigin: false },
-      '/healthz': { target: apiTarget, changeOrigin: false },
     },
   },
 })

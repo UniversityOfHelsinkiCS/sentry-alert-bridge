@@ -17,21 +17,27 @@ webhookRouter.post(
   WEBHOOK_PATH,
   express.raw({ type: '*/*', limit: '1mb' }),
   async (req, res) => {
-    if (currentIngestMode() !== 'webhook') {
-      res.status(503).json({ error: 'the app is in polling mode; webhooks are not accepted' })
-      return
-    }
-
-    if (!config.SENTRY_CLIENT_SECRET) {
-      res.status(503).json({ error: 'SENTRY_CLIENT_SECRET is not configured' })
-      return
-    }
-
+    // The signature is this route's authentication, so it is checked before
+    // anything else. Until it passes, every answer is the same 401 — the mode
+    // the app is in and whether the secret is configured are not things an
+    // unauthenticated caller gets to learn.
     const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from('')
     const signature = req.header('sentry-hook-signature')
+
+    if (!config.SENTRY_CLIENT_SECRET) {
+      logger.error('webhook received but SENTRY_CLIENT_SECRET is not configured')
+      res.status(401).json({ error: 'invalid signature' })
+      return
+    }
+
     if (!verifySignature(rawBody, signature, config.SENTRY_CLIENT_SECRET)) {
       logger.warn({ ip: req.ip }, 'webhook with a bad signature')
       res.status(401).json({ error: 'invalid signature' })
+      return
+    }
+
+    if (currentIngestMode() !== 'webhook') {
+      res.status(503).json({ error: 'the app is in polling mode; webhooks are not accepted' })
       return
     }
 

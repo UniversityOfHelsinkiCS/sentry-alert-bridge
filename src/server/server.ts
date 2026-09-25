@@ -5,7 +5,6 @@ import { config } from './config.js'
 import { logger } from './logger.js'
 import { apiRouter } from './routes/api.js'
 import { authRouter } from './routes/auth.js'
-import { healthRouter } from './routes/health.js'
 import { spaRouter } from './routes/spa.js'
 import { webhookRouter } from './routes/webhook.js'
 
@@ -15,19 +14,13 @@ export function createApp(): Express {
   // One hop, the ingress. `true` would trust any X-Forwarded-For the client
   // sends, which puts a forged address into req.ip and into the logs.
   app.set('trust proxy', 1)
-  app.use(
-    pinoHttp({
-      logger,
-      autoLogging: { ignore: (req: { url?: string }) => req.url === '/healthz' },
-    }),
-  )
+  app.use(pinoHttp({ logger }))
   app.use(cookieParser())
 
   // Mounted before express.json so it keeps the raw signed bytes.
   app.use(webhookRouter)
 
   app.use(express.json({ limit: '1mb' }))
-  app.use(healthRouter)
   app.use('/api', authRouter)
   app.use('/api', apiRouter)
 
