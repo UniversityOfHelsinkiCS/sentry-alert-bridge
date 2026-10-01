@@ -2,7 +2,6 @@ import { Router } from 'express'
 import { z } from 'zod'
 import type { ProjectIssuesDto, SettingsDto } from '../../shared/types.js'
 import { requireAuth } from '../auth/middleware.js'
-import { config } from '../config.js'
 import { countRoutesUsing, listDeliveries, recordDelivery } from '../db/deliveries.js'
 import {
   createDestination,
@@ -10,13 +9,14 @@ import {
   getDestinationLabel,
   getWebhookUrl,
   listDestinations,
+  updateDestination,
 } from '../db/destinations.js'
 import { listProjects, upsertProject } from '../db/projects.js'
 import { deleteRoute, getRoute, upsertRoute } from '../db/routes.js'
 import { listClaimStates } from '../db/seenIssues.js'
-import { getSettings } from '../db/settings.js'
+import { getSettings, type Settings, updateSettings } from '../db/settings.js'
 import { decideAlert } from '../ingest/decide.js'
-import { pollNow } from '../ingest/poller.js'
+import { pollNow, restartPoller } from '../ingest/poller.js'
 import { listNewIssues, normalizeApiIssue } from '../sentry/api.js'
 import { sendToSlack } from '../slack/client.js'
 import { formatIssue, testIssue } from '../slack/format.js'
@@ -24,6 +24,14 @@ import { formatIssue, testIssue } from '../slack/format.js'
 export const apiRouter: Router = Router()
 
 apiRouter.use(requireAuth)
+
+const destinationSchema = z.object({
+  label: z.string().min(1).max(100),
+  webhookUrl: z
+    .string()
+    .url()
+    .startsWith('https://hooks.slack.com/', 'must be a Slack incoming webhook URL'),
+})
 
 const slugSchema = z
   .string()
@@ -35,11 +43,6 @@ apiRouter.get('/projects', async (_req, res) => {
   res.json(await listProjects())
 })
 
-/**
- * What the poller would do with this project right now, issue by issue. It
- * calls Sentry with the same query the poller uses and applies the same window,
- * so "why did nothing alert?" has an answer that does not involve reading logs.
- */
 apiRouter.get('/projects/:slug/issues', async (req, res) => {
   const parsed = slugSchema.safeParse(req.params.slug)
   if (!parsed.success) {
@@ -54,15 +57,19 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
     return
   }
 
-  const [issues, states] = await Promise.all([
+  const [issues, states, settings] = await Promise.all([
     listNewIssues(projectSlug),
     listClaimStates(projectSlug),
+    getSettings(),
   ])
+
+  const cooldownMinutes = route.cooldownMinutes ?? settings.alertCooldownMinutes
+  const cooldownMs = cooldownMinutes * 60_000
 
   const body: ProjectIssuesDto = {
     projectSlug,
     alertsFrom: route.alertsFrom.toISOString(),
-    cooldownMinutes: config.ALERT_COOLDOWN_MINUTES,
+    cooldownMinutes,
     issues: issues.map((issue) => {
       const normalized = normalizeApiIssue(issue, projectSlug, null)
       const state = states.get(issue.id)
@@ -76,11 +83,11 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
         firstSeen: issue.firstSeen ?? null,
         lastSeen: issue.lastSeen ?? null,
         alertedAt: state?.alertedAt?.toISOString() ?? null,
-        // The poller's own rule, not a second copy of it.
         verdict: decideAlert({
           lastSeen: issue.lastSeen,
           alertsFrom: route.alertsFrom,
           state,
+          cooldownMs,
         }),
       }
     }),
@@ -104,7 +111,11 @@ apiRouter.post('/projects', async (req, res) => {
 apiRouter.put('/routes/:slug', async (req, res) => {
   const slug = slugSchema.safeParse(req.params.slug)
   const body = z
-    .object({ destinationId: z.number().int().positive(), enabled: z.boolean().default(true) })
+    .object({
+      destinationId: z.number().int().positive(),
+      enabled: z.boolean().default(true),
+      cooldownMinutes: z.number().int().min(0).max(1440).nullable().default(null),
+    })
     .safeParse(req.body)
 
   if (!slug.success || !body.success) {
@@ -112,9 +123,13 @@ apiRouter.put('/routes/:slug', async (req, res) => {
     return
   }
 
-  // The project row must exist first: routes.project_slug references it.
   await upsertProject(slug.data)
-  await upsertRoute(slug.data, body.data.destinationId, body.data.enabled)
+  await upsertRoute(
+    slug.data,
+    body.data.destinationId,
+    body.data.enabled,
+    body.data.cooldownMinutes,
+  )
   res.json(await listProjects())
 })
 
@@ -133,15 +148,7 @@ apiRouter.get('/destinations', async (_req, res) => {
 })
 
 apiRouter.post('/destinations', async (req, res) => {
-  const parsed = z
-    .object({
-      label: z.string().min(1).max(100),
-      webhookUrl: z
-        .string()
-        .url()
-        .startsWith('https://hooks.slack.com/', 'must be a Slack incoming webhook URL'),
-    })
-    .safeParse(req.body)
+  const parsed = destinationSchema.safeParse(req.body)
 
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'invalid destination' })
@@ -149,6 +156,28 @@ apiRouter.post('/destinations', async (req, res) => {
   }
 
   res.status(201).json(await createDestination(parsed.data.label, parsed.data.webhookUrl))
+})
+
+apiRouter.patch('/destinations/:id', async (req, res) => {
+  const id = Number(req.params.id)
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: 'invalid destination id' })
+    return
+  }
+
+  const parsed = destinationSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'invalid destination' })
+    return
+  }
+
+  const updated = await updateDestination(id, parsed.data.label, parsed.data.webhookUrl)
+  if (!updated) {
+    res.status(404).json({ error: 'destination not found' })
+    return
+  }
+
+  res.json(updated)
 })
 
 apiRouter.delete('/destinations/:id', async (req, res) => {
@@ -183,8 +212,6 @@ apiRouter.post('/destinations/:id/test', async (req, res) => {
 
   const issue = testIssue()
   try {
-    // No Resolve button: the test issue is synthetic and Sentry has never heard
-    // of it, so the button could only ever fail.
     await sendToSlack(webhookUrl, formatIssue(issue))
     await recordDelivery({
       source: 'test',
@@ -214,13 +241,38 @@ apiRouter.get('/deliveries', async (req, res) => {
   res.json(await listDeliveries(limit))
 })
 
+const toSettingsDto = (settings: Settings): SettingsDto => ({
+  pollIntervalMinutes: settings.pollIntervalMinutes,
+  alertCooldownMinutes: settings.alertCooldownMinutes,
+  retentionDays: settings.retentionDays,
+  lastPollAt: settings.lastPollAt?.toISOString() ?? null,
+})
+
 apiRouter.get('/settings', async (_req, res) => {
-  const settings = await getSettings()
-  const dto: SettingsDto = {
-    pollIntervalMinutes: config.POLL_INTERVAL_MINUTES,
-    lastPollAt: settings.lastPollAt?.toISOString() ?? null,
+  res.json(toSettingsDto(await getSettings()))
+})
+
+apiRouter.patch('/settings', async (req, res) => {
+  const parsed = z
+    .object({
+      pollIntervalMinutes: z.number().int().min(1).max(1440),
+      alertCooldownMinutes: z.number().int().min(0).max(1440),
+      retentionDays: z.number().int().min(1).max(3650),
+    })
+    .safeParse(req.body)
+
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'invalid settings' })
+    return
   }
-  res.json(dto)
+
+  const before = await getSettings()
+  const settings = await updateSettings(parsed.data)
+  if (settings.pollIntervalMinutes !== before.pollIntervalMinutes) {
+    restartPoller(settings.pollIntervalMinutes)
+  }
+
+  res.json(toSettingsDto(settings))
 })
 
 apiRouter.post('/poll', async (_req, res) => {

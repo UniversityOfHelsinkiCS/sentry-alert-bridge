@@ -1,12 +1,7 @@
 import { literal } from 'sequelize'
 import type { ProjectDto } from '../../shared/types.js'
-import { Route, SentryProject } from './models.js'
+import { Route, SentryProject } from './model/index.js'
 
-/**
- * Auto-learning: called for every issue the poller sees, and for every project
- * the Sentry API lists. `name` is left out of the payload when we do not have
- * one, so an upsert never overwrites a known name with null.
- */
 export async function upsertProject(slug: string, name?: string | null): Promise<void> {
   await SentryProject.upsert({
     slug,
@@ -18,7 +13,6 @@ export async function upsertProject(slug: string, name?: string | null): Promise
 export async function listProjects(): Promise<ProjectDto[]> {
   const projects = await SentryProject.findAll({
     include: [{ model: Route, as: 'route', required: false }],
-    // Unrouted projects first, so the ones needing attention are at the top.
     order: [literal('"route"."destination_id" is null desc'), ['slug', 'ASC']],
   })
 
@@ -31,6 +25,7 @@ export async function listProjects(): Promise<ProjectDto[]> {
       ? {
           destinationId: project.route.destinationId,
           enabled: project.route.enabled,
+          cooldownMinutes: project.route.cooldownMinutes,
           updatedAt: (project.route.updatedAt ?? project.lastSeenAt).toISOString(),
         }
       : null,

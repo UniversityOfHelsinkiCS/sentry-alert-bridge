@@ -59,7 +59,12 @@ export interface ProjectDto {
   name: string | null
   firstSeenAt: string
   lastSeenAt: string
-  route: { destinationId: number; enabled: boolean; updatedAt: string } | null
+  route: {
+    destinationId: number
+    enabled: boolean
+    cooldownMinutes: number | null
+    updatedAt: string
+  } | null
 }
 
 export interface DeliveryDto {
@@ -77,6 +82,8 @@ export interface DeliveryDto {
 
 export interface SettingsDto {
   pollIntervalMinutes: number
+  alertCooldownMinutes: number
+  retentionDays: number
   lastPollAt: string | null
 }
 

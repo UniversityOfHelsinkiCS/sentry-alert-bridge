@@ -1,9 +1,8 @@
-import { config } from '../config.js'
-import { recordDelivery } from '../db/deliveries.js'
+import { pruneDeliveries, recordDelivery } from '../db/deliveries.js'
 import { upsertProject } from '../db/projects.js'
 import { listEnabledRoutes } from '../db/routes.js'
-import { listClaimStates } from '../db/seenIssues.js'
-import { touchLastPoll } from '../db/settings.js'
+import { listClaimStates, pruneSeenIssues } from '../db/seenIssues.js'
+import { getSettings, touchLastPoll } from '../db/settings.js'
 import { decideAlert } from './decide.js'
 import { logger } from '../logger.js'
 import {
@@ -24,20 +23,29 @@ export interface PollSummary {
   polled: number
   sent: number
   unrouted: number
-  /** Seen but not alertable: history, nothing new, or still in cooldown. */
   skipped: number
   failed: number
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const DAY_MS = 86_400_000
 
-/**
- * One poll tick. An issue alerts when it has been seen since the last time this
- * app alerted on it — see decide.ts for the full rule. The route's alerts_from
- * keeps history out, and the cooldown keeps a constantly-failing issue from
- * filling the channel.
- */
+async function prune(retentionDays: number): Promise<void> {
+  const before = new Date(Date.now() - retentionDays * DAY_MS)
+  try {
+    const [deliveries, seenIssues] = await Promise.all([
+      pruneDeliveries(before),
+      pruneSeenIssues(before),
+    ])
+    if (deliveries > 0 || seenIssues > 0) {
+      logger.info({ deliveries, seenIssues, before }, 'pruned history')
+    }
+  } catch (err) {
+    logger.warn({ err }, 'prune failed')
+  }
+}
+
 export async function pollOnce(): Promise<PollSummary> {
   const summary: PollSummary = {
     projects: 0,
@@ -48,6 +56,7 @@ export async function pollOnce(): Promise<PollSummary> {
     failed: 0,
   }
 
+  const settings = await getSettings()
   const names = new Map<string, string | null>()
   try {
     const projects = await listOrgProjects()
@@ -69,7 +78,6 @@ export async function pollOnce(): Promise<PollSummary> {
     }
   }
 
-  // Only projects someone has actually routed are worth an API call.
   for (const route of await listEnabledRoutes()) {
     try {
       const issues = await listNewIssues(route.projectSlug)
@@ -82,6 +90,8 @@ export async function pollOnce(): Promise<PollSummary> {
           lastSeen: issue.lastSeen,
           alertsFrom: route.alertsFrom,
           state: states.get(issue.id),
+          cooldownMs:
+            (route.cooldownMinutes ?? settings.alertCooldownMinutes) * 60_000,
         })
 
         if (decision !== 'alert') {
@@ -110,7 +120,6 @@ export async function pollOnce(): Promise<PollSummary> {
         outcome: 'failed',
         detail: err instanceof Error ? err.message : 'unknown sentry api error',
       })
-      // A rate limit applies to the whole instance; back off until next tick.
       if (err instanceof SentryApiError && err.isRateLimited) break
     }
 
@@ -118,11 +127,11 @@ export async function pollOnce(): Promise<PollSummary> {
   }
 
   await touchLastPoll()
+  await prune(settings.retentionDays)
   logger.info(summary, 'poll tick finished')
   return summary
 }
 
-/** Ticks never overlap: a slow tick simply means the next one is skipped. */
 async function tick(): Promise<void> {
   if (running) {
     logger.warn('previous poll tick still running, skipping this one')
@@ -142,12 +151,23 @@ export function isPollerRunning(): boolean {
   return timer !== null
 }
 
-export function startPoller(): void {
-  if (timer) return
-  logger.info({ intervalMinutes: config.POLL_INTERVAL_MINUTES }, 'starting sentry poller')
-  timer = setInterval(() => void tick(), config.pollIntervalMs)
+function schedule(intervalMs: number): void {
+  timer = setInterval(() => void tick(), intervalMs)
   timer.unref()
+}
+
+export async function startPoller(): Promise<void> {
+  if (timer) return
+  const { pollIntervalMinutes } = await getSettings()
+  logger.info({ intervalMinutes: pollIntervalMinutes }, 'starting sentry poller')
+  schedule(pollIntervalMinutes * 60_000)
   void tick()
+}
+
+export function restartPoller(intervalMinutes: number): void {
+  stopPoller()
+  logger.info({ intervalMinutes }, 'restarting sentry poller')
+  schedule(intervalMinutes * 60_000)
 }
 
 export function stopPoller(): void {
@@ -157,7 +177,6 @@ export function stopPoller(): void {
   logger.info('stopped sentry poller')
 }
 
-/** Runs a tick on demand, for the "Poll now" button. */
 export async function pollNow(): Promise<PollSummary> {
   if (running) throw new Error('a poll is already running')
   running = true

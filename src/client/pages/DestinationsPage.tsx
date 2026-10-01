@@ -27,24 +27,43 @@ export default function DestinationsPage() {
   const destinations = useApi(() => api.destinations(), [])
   const { show, toast } = useToast()
 
-  const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<DestinationDto | 'new' | null>(null)
   const [label, setLabel] = useState('')
   const [webhookUrl, setWebhookUrl] = useState('')
-  const [addError, setAddError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<DestinationDto | null>(null)
   const [testing, setTesting] = useState<number | null>(null)
 
-  const add = async () => {
-    setAddError(null)
+  const openAdd = () => {
+    setFormError(null)
+    setLabel('')
+    setWebhookUrl('')
+    setEditing('new')
+  }
+
+  const openEdit = (destination: DestinationDto) => {
+    setFormError(null)
+    setLabel(destination.label)
+    setWebhookUrl(destination.webhookUrl)
+    setEditing(destination)
+  }
+
+  const save = async () => {
+    if (!editing) return
+    setFormError(null)
     try {
-      await api.addDestination(label.trim(), webhookUrl.trim())
-      setAdding(false)
+      if (editing === 'new') {
+        await api.addDestination(label.trim(), webhookUrl.trim())
+      } else {
+        await api.updateDestination(editing.id, label.trim(), webhookUrl.trim())
+      }
+      setEditing(null)
       setLabel('')
       setWebhookUrl('')
       destinations.reload()
-      show('destination added')
+      show(editing === 'new' ? 'destination added' : 'destination updated')
     } catch (err) {
-      setAddError(errorMessage(err))
+      setFormError(errorMessage(err))
     }
   }
 
@@ -84,11 +103,11 @@ export default function DestinationsPage() {
         <Box>
           <Typography variant="h5">Destinations</Typography>
           <Typography variant="body2" color="text.secondary">
-            One Slack incoming webhook per channel. The URL is never shown again — replace the
-            destination to change it.
+            One Slack incoming webhook per channel. Both the label and the URL can be edited
+            later without disturbing the projects routed here.
           </Typography>
         </Box>
-        <Button variant="contained" onClick={() => setAdding(true)}>
+        <Button variant="contained" onClick={openAdd}>
           Add destination
         </Button>
       </Stack>
@@ -137,6 +156,9 @@ export default function DestinationsPage() {
                   )}
                 </TableCell>
                 <TableCell align="right">
+                  <Button size="small" onClick={() => openEdit(d)}>
+                    Edit
+                  </Button>
                   <Button size="small" onClick={() => test(d.id)} disabled={testing === d.id}>
                     {testing === d.id ? 'Sending…' : 'Test'}
                   </Button>
@@ -150,11 +172,13 @@ export default function DestinationsPage() {
         </Table>
       </Paper>
 
-      <Dialog open={adding} onClose={() => setAdding(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Add a Slack destination</DialogTitle>
+      <Dialog open={editing !== null} onClose={() => setEditing(null)} fullWidth maxWidth="sm">
+        <DialogTitle>
+          {editing === 'new' ? 'Add a Slack destination' : `Edit ${editing?.label ?? ''}`}
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            {addError && <Alert severity="error">{addError}</Alert>}
+            {formError && <Alert severity="error">{formError}</Alert>}
             <TextField
               label="Label"
               placeholder="#backend-alerts"
@@ -165,8 +189,7 @@ export default function DestinationsPage() {
             />
             <TextField
               label="Slack incoming webhook URL"
-              type="password"
-              helperText="From Slack: Incoming Webhooks → Add New Webhook to Workspace. Never shown again."
+              helperText="From Slack: Incoming Webhooks → Add New Webhook to Workspace."
               value={webhookUrl}
               onChange={(e) => setWebhookUrl(e.target.value)}
               fullWidth
@@ -174,13 +197,13 @@ export default function DestinationsPage() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAdding(false)}>Cancel</Button>
+          <Button onClick={() => setEditing(null)}>Cancel</Button>
           <Button
             variant="contained"
-            onClick={add}
+            onClick={save}
             disabled={label.trim().length === 0 || webhookUrl.trim().length === 0}
           >
-            Add
+            {editing === 'new' ? 'Add' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>
