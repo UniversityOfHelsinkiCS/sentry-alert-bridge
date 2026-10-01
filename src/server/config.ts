@@ -2,10 +2,6 @@ import 'dotenv/config'
 import { z } from 'zod'
 import { DEFAULTS } from './defaults.js'
 
-/**
- * The only module in the app that reads process.env. Everything else imports
- * `config`. Adding an env var means adding a line here and to .env.example.
- */
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(8000),
@@ -18,7 +14,7 @@ const schema = z.object({
 
   SENTRY_BASE_URL: z.string().url().default('https://toska.it.helsinki.fi'),
   SENTRY_ORG_SLUG: z.string().min(1).default('sentry'),
-  SENTRY_AUTH_TOKEN: z.string().min(1, 'SENTRY_AUTH_TOKEN is required'),
+  SENTRY_AUTH_TOKEN: z.string().min(1).optional(),
   POLL_INTERVAL_MINUTES: z.coerce
     .number()
     .int()
@@ -32,8 +28,6 @@ const schema = z.object({
     .max(1440)
     .default(DEFAULTS.alertCooldownMinutes),
 
-  // Socket Mode app-level token, for the Resolve button in Slack alerts.
-  // Optional: without it the app behaves exactly as before, minus the button.
   SLACK_APP_TOKEN: z.string().startsWith('xapp-').optional(),
 
   ACCESS_TOKEN: z
@@ -61,12 +55,6 @@ export interface Config extends Env {
   alertCooldownMs: number
 }
 
-/**
- * A blank line in .env ("STAGING=") arrives as an empty string, which is not
- * the same as unset to zod — it would fail an enum or a min(1) instead of
- * falling back to the default. Copying .env.example is the normal way to start,
- * so empty means "not set" here.
- */
 function withoutBlanks(env: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => {

@@ -15,6 +15,7 @@ import Typography from '@mui/material/Typography'
 import { Link as RouterLink } from 'react-router-dom'
 import type { DeliveryOutcome } from '../../shared/types'
 import { api, useApi } from '../api'
+import { useOrg } from '../OrgContext'
 
 const OUTCOME_COLOR: Record<DeliveryOutcome, 'success' | 'error' | 'default' | 'warning'> = {
   sent: 'success',
@@ -27,7 +28,8 @@ export function OutcomeChip({ outcome }: { outcome: DeliveryOutcome }) {
 }
 
 export default function DeliveriesPage() {
-  const deliveries = useApi(() => api.deliveries(100), [])
+  const org = useOrg()
+  const deliveries = useApi(() => api.deliveries(org, 100), [org])
 
   if (deliveries.loading) return <Skeleton variant="rectangular" height={320} />
 

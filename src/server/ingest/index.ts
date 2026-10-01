@@ -10,22 +10,17 @@ import { formatIssue } from '../slack/format.js'
 
 export type IngestResult = 'sent' | 'unrouted' | 'failed'
 
-/**
- * The single path every alertable issue takes: route, format, send, log.
- *
- * Whether an issue deserves an alert at all is decided before this, in
- * decide.ts — the caller only brings issues that passed.
- */
 export async function handleIssue(
   issue: NormalizedIssue,
   source: IngestSource,
 ): Promise<IngestResult> {
-  await upsertProject(issue.projectSlug, issue.projectName)
+  await upsertProject(issue.orgSlug, issue.projectSlug, issue.projectName)
 
-  const route = await getRoute(issue.projectSlug)
+  const route = await getRoute(issue.orgSlug, issue.projectSlug)
   if (!route || !route.enabled) {
     await recordDelivery({
       source,
+      orgSlug: issue.orgSlug,
       projectSlug: issue.projectSlug,
       issueTitle: issue.title,
       issueUrl: issue.url,
@@ -39,6 +34,7 @@ export async function handleIssue(
   if (!webhookUrl) {
     await recordDelivery({
       source,
+      orgSlug: issue.orgSlug,
       projectSlug: issue.projectSlug,
       issueTitle: issue.title,
       issueUrl: issue.url,
@@ -52,11 +48,11 @@ export async function handleIssue(
   try {
     await sendToSlack(webhookUrl, formatIssue(issue, { resolvable: true }))
 
-    // Only now, so a failed send is simply tried again on the next tick.
-    await recordAlert(issue.projectSlug, issue.id)
+    await recordAlert(issue.orgSlug, issue.projectSlug, issue.id)
 
     await recordDelivery({
       source,
+      orgSlug: issue.orgSlug,
       projectSlug: issue.projectSlug,
       issueTitle: issue.title,
       issueUrl: issue.url,
@@ -65,12 +61,14 @@ export async function handleIssue(
     })
     return 'sent'
   } catch (err) {
-    // Nothing to undo: the alert was never recorded, so the next tick will
-    // find the issue unalerted and try again.
     const detail = err instanceof Error ? err.message : 'unknown slack error'
-    logger.error({ err, projectSlug: issue.projectSlug }, 'slack delivery failed')
+    logger.error(
+      { err, orgSlug: issue.orgSlug, projectSlug: issue.projectSlug },
+      'slack delivery failed',
+    )
     await recordDelivery({
       source,
+      orgSlug: issue.orgSlug,
       projectSlug: issue.projectSlug,
       issueTitle: issue.title,
       issueUrl: issue.url,

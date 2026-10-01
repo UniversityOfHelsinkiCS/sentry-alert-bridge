@@ -22,6 +22,7 @@ import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { IssueVerdict, ProjectDto, ProjectIssuesDto } from '../../shared/types'
 import { api, useApi } from '../api'
+import { useOrg } from '../OrgContext'
 import { errorMessage, useToast } from '../useToast'
 
 const UNROUTED = ''
@@ -57,7 +58,7 @@ const VERDICTS: Record<
   },
 }
 
-function IssueDebugPanel({ slug }: { slug: string }) {
+function IssueDebugPanel({ org, slug }: { org: string; slug: string }) {
   const [state, setState] = useState<ProjectIssuesDto | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -66,13 +67,13 @@ function IssueDebugPanel({ slug }: { slug: string }) {
     setState(null)
     setError(null)
     api
-      .projectIssues(slug)
+      .projectIssues(org, slug)
       .then((data) => live && setState(data))
       .catch((err) => live && setError(errorMessage(err)))
     return () => {
       live = false
     }
-  }, [slug])
+  }, [org, slug])
 
   if (error) return <Alert severity="error">{error}</Alert>
   if (!state) return <Skeleton variant="rectangular" height={80} />
@@ -199,8 +200,9 @@ function CooldownField({
 }
 
 export default function RoutingPage() {
-  const projects = useApi(() => api.projects(), [])
-  const destinations = useApi(() => api.destinations(), [])
+  const org = useOrg()
+  const projects = useApi(() => api.projects(org), [org])
+  const destinations = useApi(() => api.destinations(org), [org])
   const settings = useApi(() => api.settings(), [])
   const { show, toast } = useToast()
   const [newSlug, setNewSlug] = useState('')
@@ -218,8 +220,8 @@ export default function RoutingPage() {
     try {
       const updated =
         destinationId === null
-          ? await api.clearRoute(project.slug)
-          : await api.setRoute(project.slug, destinationId, enabled, cooldownMinutes)
+          ? await api.clearRoute(org, project.slug)
+          : await api.setRoute(org, project.slug, destinationId, enabled, cooldownMinutes)
       projects.setData(updated)
       show(destinationId === null ? `${project.slug} unrouted` : `${project.slug} saved`)
     } catch (err) {
@@ -231,7 +233,7 @@ export default function RoutingPage() {
   const addProject = async (event: FormEvent) => {
     event.preventDefault()
     try {
-      projects.setData(await api.addProject(newSlug.trim()))
+      projects.setData(await api.addProject(org, newSlug.trim()))
       setNewSlug('')
       show('project added')
     } catch (err) {
@@ -319,7 +321,7 @@ export default function RoutingPage() {
                 <TableCell>
                   <Stack direction="row" spacing={1} alignItems="center">
                     <Typography variant="body2">{project.name ?? project.slug}</Typography>
-                    {project.name && (
+                    {project.name && project.name !== project.slug && (
                       <Typography variant="caption" color="text.secondary">
                         {project.slug}
                       </Typography>
@@ -386,7 +388,7 @@ export default function RoutingPage() {
               <TableRow>
                 <TableCell colSpan={6} sx={{ py: 0, border: 0 }}>
                   <Collapse in={expanded === project.slug} unmountOnExit>
-                    <IssueDebugPanel slug={project.slug} />
+                    <IssueDebugPanel org={org} slug={project.slug} />
                   </Collapse>
                 </TableCell>
               </TableRow>

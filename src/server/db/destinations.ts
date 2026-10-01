@@ -9,6 +9,7 @@ async function toDto(destination: SlackDestination): Promise<DestinationDto> {
 
   return {
     id: destination.id,
+    orgSlug: destination.orgSlug,
     label: destination.label,
     webhookUrl: destination.webhookUrl,
     createdAt: destination.createdAt.toISOString(),
@@ -17,16 +18,20 @@ async function toDto(destination: SlackDestination): Promise<DestinationDto> {
   }
 }
 
-export async function listDestinations(): Promise<DestinationDto[]> {
-  const destinations = await SlackDestination.findAll({ order: [['label', 'ASC']] })
+export async function listDestinations(orgSlug: string): Promise<DestinationDto[]> {
+  const destinations = await SlackDestination.findAll({
+    where: { orgSlug },
+    order: [['label', 'ASC']],
+  })
   return Promise.all(destinations.map(toDto))
 }
 
 export async function createDestination(
+  orgSlug: string,
   label: string,
   webhookUrl: string,
 ): Promise<DestinationDto> {
-  const destination = await SlackDestination.create({ label, webhookUrl })
+  const destination = await SlackDestination.create({ orgSlug, label, webhookUrl })
   return toDto(destination)
 }
 
@@ -53,4 +58,9 @@ export async function getWebhookUrl(id: number): Promise<string | null> {
 export async function getDestinationLabel(id: number): Promise<string | null> {
   const destination = await SlackDestination.findByPk(id, { attributes: ['label'] })
   return destination?.label ?? null
+}
+
+export async function getDestinationOrg(id: number): Promise<string | null> {
+  const destination = await SlackDestination.findByPk(id, { attributes: ['orgSlug'] })
+  return destination?.orgSlug ?? null
 }

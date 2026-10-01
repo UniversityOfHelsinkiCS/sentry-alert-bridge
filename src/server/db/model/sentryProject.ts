@@ -6,21 +6,21 @@ import {
   Model,
 } from 'sequelize'
 import { common } from './common.js'
-import type { Route } from './route.js'
 
 export class SentryProject extends Model<
   InferAttributes<SentryProject>,
   InferCreationAttributes<SentryProject>
 > {
+  declare orgSlug: string
   declare slug: string
   declare name: string | null
   declare firstSeenAt: CreationOptional<Date>
   declare lastSeenAt: CreationOptional<Date>
-  declare route?: Route | null
 }
 
 SentryProject.init(
   {
+    orgSlug: { type: DataTypes.TEXT, primaryKey: true },
     slug: { type: DataTypes.TEXT, primaryKey: true },
     name: { type: DataTypes.TEXT, allowNull: true },
     firstSeenAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },

@@ -9,6 +9,7 @@ interface Block {
 
 const issue: NormalizedIssue = {
   id: '42',
+  orgSlug: 'sentry',
   title: 'TypeError: cannot read property of undefined',
   culprit: 'app/routes/index.ts',
   level: 'error',
@@ -69,7 +70,8 @@ describe('formatIssue', () => {
     const button = actions?.elements?.[0]
     expect(button?.action_id).toBe('resolve_issue')
     expect(JSON.parse(button?.value ?? '{}')).toEqual({
-      v: 1,
+      v: 2,
+      orgSlug: 'sentry',
       projectSlug: 'backend',
       issueId: '42',
     })

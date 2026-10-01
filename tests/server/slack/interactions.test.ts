@@ -17,11 +17,24 @@ function payload(value: unknown, overrides: Record<string, unknown> = {}) {
   }
 }
 
-const good = { v: 1, projectSlug: 'backend', issueId: '42' }
+const good = { v: 2, orgSlug: 'sentry', projectSlug: 'backend', issueId: '42' }
 
 describe('parseInteraction', () => {
   it('pulls the project, issue, user and response url out of a click', () => {
     expect(parseInteraction(payload(good))).toEqual({
+      orgSlug: 'sentry',
+      projectSlug: 'backend',
+      issueId: '42',
+      userId: 'U123',
+      responseUrl: 'https://hooks.slack.com/actions/T1/B2/abc',
+      blocks: [{ type: 'section' }],
+    })
+  })
+
+  it('still parses a v1 value from before multi-org support, with no org', () => {
+    const legacy = { v: 1, projectSlug: 'backend', issueId: '42' }
+    expect(parseInteraction(payload(legacy))).toEqual({
+      orgSlug: null,
       projectSlug: 'backend',
       issueId: '42',
       userId: 'U123',
@@ -50,7 +63,7 @@ describe('parseInteraction', () => {
   })
 
   it('rejects an unknown value version', () => {
-    expect(parseInteraction(payload({ ...good, v: 2 }))).toBeNull()
+    expect(parseInteraction(payload({ ...good, v: 3 }))).toBeNull()
   })
 
   it('rejects a response url that is not slack', () => {

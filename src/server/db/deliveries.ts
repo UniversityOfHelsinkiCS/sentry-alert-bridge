@@ -4,6 +4,7 @@ import { Delivery, Route, SlackDestination } from './model/index.js'
 
 export interface RecordDelivery {
   source: IngestSource
+  orgSlug?: string | null
   projectSlug?: string | null
   issueTitle?: string | null
   issueUrl?: string | null
@@ -15,6 +16,7 @@ export interface RecordDelivery {
 export async function recordDelivery(d: RecordDelivery): Promise<void> {
   await Delivery.create({
     source: d.source,
+    orgSlug: d.orgSlug ?? null,
     projectSlug: d.projectSlug ?? null,
     issueTitle: d.issueTitle ?? null,
     issueUrl: d.issueUrl ?? null,
@@ -24,8 +26,9 @@ export async function recordDelivery(d: RecordDelivery): Promise<void> {
   })
 }
 
-export async function listDeliveries(limit: number): Promise<DeliveryDto[]> {
+export async function listDeliveries(orgSlug: string, limit: number): Promise<DeliveryDto[]> {
   const rows = await Delivery.findAll({
+    where: { orgSlug },
     include: [
       { model: SlackDestination, as: 'destination', required: false, attributes: ['label'] },
     ],
@@ -40,6 +43,7 @@ export async function listDeliveries(limit: number): Promise<DeliveryDto[]> {
     id: String(row.id),
     receivedAt: row.receivedAt.toISOString(),
     source: row.source,
+    orgSlug: row.orgSlug,
     projectSlug: row.projectSlug,
     issueTitle: row.issueTitle,
     issueUrl: row.issueUrl,

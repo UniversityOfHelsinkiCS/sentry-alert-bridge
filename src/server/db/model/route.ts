@@ -8,6 +8,7 @@ import {
 import { common } from './common.js'
 
 export class Route extends Model<InferAttributes<Route>, InferCreationAttributes<Route>> {
+  declare orgSlug: string
   declare projectSlug: string
   declare destinationId: number
   declare enabled: CreationOptional<boolean>
@@ -18,6 +19,7 @@ export class Route extends Model<InferAttributes<Route>, InferCreationAttributes
 
 Route.init(
   {
+    orgSlug: { type: DataTypes.TEXT, primaryKey: true },
     projectSlug: { type: DataTypes.TEXT, primaryKey: true },
     destinationId: { type: DataTypes.INTEGER, allowNull: false },
     enabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },

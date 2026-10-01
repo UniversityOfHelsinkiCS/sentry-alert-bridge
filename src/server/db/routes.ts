@@ -1,6 +1,7 @@
 import { Route as RouteModel } from './model/index.js'
 
 export interface Route {
+  orgSlug: string
   projectSlug: string
   destinationId: number
   enabled: boolean
@@ -9,6 +10,7 @@ export interface Route {
 }
 
 const toRoute = (row: RouteModel): Route => ({
+  orgSlug: row.orgSlug,
   projectSlug: row.projectSlug,
   destinationId: row.destinationId,
   enabled: row.enabled,
@@ -16,26 +18,28 @@ const toRoute = (row: RouteModel): Route => ({
   cooldownMinutes: row.cooldownMinutes,
 })
 
-export async function getRoute(projectSlug: string): Promise<Route | null> {
-  const row = await RouteModel.findByPk(projectSlug)
+export async function getRoute(orgSlug: string, projectSlug: string): Promise<Route | null> {
+  const row = await RouteModel.findOne({ where: { orgSlug, projectSlug } })
   return row ? toRoute(row) : null
 }
 
-export async function listEnabledRoutes(): Promise<Route[]> {
+export async function listEnabledRoutes(orgSlug?: string): Promise<Route[]> {
   const rows = await RouteModel.findAll({
-    where: { enabled: true },
+    where: { enabled: true, ...(orgSlug === undefined ? {} : { orgSlug }) },
     order: [['projectSlug', 'ASC']],
   })
   return rows.map(toRoute)
 }
 
 export async function upsertRoute(
+  orgSlug: string,
   projectSlug: string,
   destinationId: number,
   enabled: boolean,
   cooldownMinutes: number | null,
 ): Promise<void> {
   await RouteModel.upsert({
+    orgSlug,
     projectSlug,
     destinationId,
     enabled,
@@ -44,6 +48,6 @@ export async function upsertRoute(
   })
 }
 
-export async function deleteRoute(projectSlug: string): Promise<void> {
-  await RouteModel.destroy({ where: { projectSlug } })
+export async function deleteRoute(orgSlug: string, projectSlug: string): Promise<void> {
+  await RouteModel.destroy({ where: { orgSlug, projectSlug } })
 }

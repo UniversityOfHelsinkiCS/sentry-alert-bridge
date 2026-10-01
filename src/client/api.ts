@@ -3,6 +3,7 @@ import type {
   DeliveryDto,
   DestinationDto,
   MeDto,
+  OrgDto,
   ProjectDto,
   ProjectIssuesDto,
   SettingsDto,
@@ -43,32 +44,61 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 const body = (data: unknown) => ({ body: JSON.stringify(data) })
 
+const scoped = (path: string, org: string, extra: Record<string, string> = {}) => {
+  const params = new URLSearchParams({ org, ...extra })
+  return `${path}?${params.toString()}`
+}
+
+export interface OrgInput {
+  slug: string
+  name: string | null
+  authToken?: string
+  baseUrl: string | null
+}
+
 export const api = {
   me: () => request<MeDto>('/me'),
   login: (token: string) => request<{ ok: true }>('/login', { method: 'POST', ...body({ token }) }),
   logout: () => request<{ ok: true }>('/logout', { method: 'POST' }),
 
-  projects: () => request<ProjectDto[]>('/projects'),
-  projectIssues: (slug: string) =>
-    request<ProjectIssuesDto>(`/projects/${encodeURIComponent(slug)}/issues`),
-  addProject: (slug: string) =>
-    request<ProjectDto[]>('/projects', { method: 'POST', ...body({ slug }) }),
+  orgs: () => request<OrgDto[]>('/orgs'),
+  addOrg: (input: OrgInput) => request<OrgDto>('/orgs', { method: 'POST', ...body(input) }),
+  updateOrg: (slug: string, input: Omit<OrgInput, 'slug'>) =>
+    request<OrgDto>(`/orgs/${encodeURIComponent(slug)}`, { method: 'PATCH', ...body(input) }),
+  deleteOrg: (slug: string) =>
+    request<{ ok: true }>(`/orgs/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
+  testOrg: (slug: string) =>
+    request<{ ok: true; projects: number }>(`/orgs/${encodeURIComponent(slug)}/test`, {
+      method: 'POST',
+    }),
+
+  projects: (org: string) => request<ProjectDto[]>(scoped('/projects', org)),
+  projectIssues: (org: string, slug: string) =>
+    request<ProjectIssuesDto>(scoped(`/projects/${encodeURIComponent(slug)}/issues`, org)),
+  addProject: (org: string, slug: string) =>
+    request<ProjectDto[]>(scoped('/projects', org), { method: 'POST', ...body({ slug }) }),
   setRoute: (
+    org: string,
     slug: string,
     destinationId: number,
     enabled: boolean,
     cooldownMinutes: number | null = null,
   ) =>
-    request<ProjectDto[]>(`/routes/${encodeURIComponent(slug)}`, {
+    request<ProjectDto[]>(scoped(`/routes/${encodeURIComponent(slug)}`, org), {
       method: 'PUT',
       ...body({ destinationId, enabled, cooldownMinutes }),
     }),
-  clearRoute: (slug: string) =>
-    request<ProjectDto[]>(`/routes/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
+  clearRoute: (org: string, slug: string) =>
+    request<ProjectDto[]>(scoped(`/routes/${encodeURIComponent(slug)}`, org), {
+      method: 'DELETE',
+    }),
 
-  destinations: () => request<DestinationDto[]>('/destinations'),
-  addDestination: (label: string, webhookUrl: string) =>
-    request<DestinationDto>('/destinations', { method: 'POST', ...body({ label, webhookUrl }) }),
+  destinations: (org: string) => request<DestinationDto[]>(scoped('/destinations', org)),
+  addDestination: (org: string, label: string, webhookUrl: string) =>
+    request<DestinationDto>(scoped('/destinations', org), {
+      method: 'POST',
+      ...body({ label, webhookUrl }),
+    }),
   updateDestination: (id: number, label: string, webhookUrl: string) =>
     request<DestinationDto>(`/destinations/${id}`, {
       method: 'PATCH',
@@ -79,7 +109,8 @@ export const api = {
   testDestination: (id: number) =>
     request<{ ok: true }>(`/destinations/${id}/test`, { method: 'POST' }),
 
-  deliveries: (limit = 100) => request<DeliveryDto[]>(`/deliveries?limit=${limit}`),
+  deliveries: (org: string, limit = 100) =>
+    request<DeliveryDto[]>(scoped('/deliveries', org, { limit: String(limit) })),
 
   settings: () => request<SettingsDto>('/settings'),
   updateSettings: (

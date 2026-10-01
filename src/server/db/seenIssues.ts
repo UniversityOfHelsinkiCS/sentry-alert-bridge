@@ -6,9 +6,12 @@ export interface ClaimState {
   releasedAt: Date | null
 }
 
-export async function listClaimStates(projectSlug: string): Promise<Map<string, ClaimState>> {
+export async function listClaimStates(
+  orgSlug: string,
+  projectSlug: string,
+): Promise<Map<string, ClaimState>> {
   const rows = await SeenIssue.findAll({
-    where: { projectSlug },
+    where: { orgSlug, projectSlug },
     attributes: ['issueId', 'alertedAt', 'releasedAt'],
   })
   return new Map(
@@ -16,11 +19,15 @@ export async function listClaimStates(projectSlug: string): Promise<Map<string, 
   )
 }
 
-export async function recordAlert(projectSlug: string, issueId: string): Promise<void> {
+export async function recordAlert(
+  orgSlug: string,
+  projectSlug: string,
+  issueId: string,
+): Promise<void> {
   const now = new Date()
   const [row, created] = await SeenIssue.findOrCreate({
-    where: { projectSlug, issueId },
-    defaults: { projectSlug, issueId, alertedAt: now, releasedAt: null },
+    where: { orgSlug, projectSlug, issueId },
+    defaults: { orgSlug, projectSlug, issueId, alertedAt: now, releasedAt: null },
   })
   if (created) return
 
@@ -29,8 +36,12 @@ export async function recordAlert(projectSlug: string, issueId: string): Promise
   await row.save()
 }
 
-export async function markIssueResolved(projectSlug: string, issueId: string): Promise<void> {
-  await SeenIssue.update({ releasedAt: new Date() }, { where: { projectSlug, issueId } })
+export async function markIssueResolved(
+  orgSlug: string,
+  projectSlug: string,
+  issueId: string,
+): Promise<void> {
+  await SeenIssue.update({ releasedAt: new Date() }, { where: { orgSlug, projectSlug, issueId } })
 }
 
 export async function pruneSeenIssues(before: Date): Promise<number> {

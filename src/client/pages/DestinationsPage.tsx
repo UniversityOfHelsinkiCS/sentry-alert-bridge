@@ -20,11 +20,13 @@ import Typography from '@mui/material/Typography'
 import { useState } from 'react'
 import type { DestinationDto } from '../../shared/types'
 import { api, useApi } from '../api'
+import { useOrg } from '../OrgContext'
 import { errorMessage, useToast } from '../useToast'
 import { OutcomeChip } from './DeliveriesPage'
 
 export default function DestinationsPage() {
-  const destinations = useApi(() => api.destinations(), [])
+  const org = useOrg()
+  const destinations = useApi(() => api.destinations(org), [org])
   const { show, toast } = useToast()
 
   const [editing, setEditing] = useState<DestinationDto | 'new' | null>(null)
@@ -53,7 +55,7 @@ export default function DestinationsPage() {
     setFormError(null)
     try {
       if (editing === 'new') {
-        await api.addDestination(label.trim(), webhookUrl.trim())
+        await api.addDestination(org, label.trim(), webhookUrl.trim())
       } else {
         await api.updateDestination(editing.id, label.trim(), webhookUrl.trim())
       }

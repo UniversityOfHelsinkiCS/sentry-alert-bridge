@@ -12,7 +12,6 @@ function emojiFor(level: string | null | undefined): string {
   }
 }
 
-/** Slack treats &, < and > specially inside mrkdwn. */
 function escape(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -30,14 +29,9 @@ export interface SlackMessage {
 export const RESOLVE_ACTION_ID = 'resolve_issue'
 
 export interface FormatOptions {
-  /** Adds the Resolve button. Off by default so the test alert cannot get one. */
   resolvable?: boolean
 }
 
-/**
- * What the button carries back to us on a click. Versioned so a later change to
- * the encoding does not break the buttons already sitting in Slack history.
- */
 function resolveButton(issue: NormalizedIssue) {
   return {
     type: 'actions',
@@ -48,8 +42,12 @@ function resolveButton(issue: NormalizedIssue) {
         action_id: RESOLVE_ACTION_ID,
         text: { type: 'plain_text', text: 'Resolve' },
         style: 'primary',
-        value: JSON.stringify({ v: 1, projectSlug: issue.projectSlug, issueId: issue.id }),
-        // Without this a mistaken tap on a phone silently mutates Sentry.
+        value: JSON.stringify({
+          v: 2,
+          orgSlug: issue.orgSlug,
+          projectSlug: issue.projectSlug,
+          issueId: issue.id,
+        }),
         confirm: {
           title: { type: 'plain_text', text: 'Resolve this issue?' },
           text: { type: 'mrkdwn', text: 'This marks the issue resolved in Sentry.' },
@@ -88,27 +86,16 @@ export function formatIssue(issue: NormalizedIssue, options: FormatOptions = {})
     })
   }
 
-  // Slack allows at most 10 fields per section.
   if (fields.length > 0) blocks.push({ type: 'section', fields: fields.slice(0, 10) })
 
   if (options.resolvable) blocks.push(resolveButton(issue))
 
   return {
-    // Fallback for notifications and clients that ignore blocks.
     text: `${emoji} ${issue.projectSlug}: ${issue.title}`,
     blocks,
   }
 }
 
-/**
- * Rewrites the blocks Slack hands back on a click: drops the actions block so
- * the button cannot be pressed twice, and notes who resolved it. Working from
- * the original message means we never have to reconstruct the issue, so this
- * keeps working even if formatIssue changes.
- *
- * `<@id>` rather than a username: Slack renders the display name itself, and
- * the username field is often absent from the payload.
- */
 export function markResolved(blocks: unknown[], userId: string): unknown[] {
   const kept = blocks.filter((block) => {
     return !(typeof block === 'object' && block !== null && 'type' in block &&
@@ -124,7 +111,6 @@ export function markResolved(blocks: unknown[], userId: string): unknown[] {
   ]
 }
 
-/** The synthetic issue behind the "Test" button on the destinations page. */
 export function testIssue(): NormalizedIssue {
   return {
     id: `test-${Date.now()}`,
@@ -134,6 +120,7 @@ export function testIssue(): NormalizedIssue {
     shortId: 'TEST-1',
     url: null,
     count: 1,
+    orgSlug: 'sentry',
     projectSlug: 'sentry-alert-bridge',
     projectName: 'sentry-alert-bridge',
     environment: 'test',

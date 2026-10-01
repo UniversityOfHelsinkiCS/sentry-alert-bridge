@@ -16,6 +16,7 @@ export class Delivery extends Model<
   declare id: CreationOptional<string>
   declare receivedAt: CreationOptional<Date>
   declare source: IngestSource
+  declare orgSlug: string | null
   declare projectSlug: string | null
   declare issueTitle: string | null
   declare issueUrl: string | null
@@ -30,6 +31,7 @@ Delivery.init(
     id: { type: DataTypes.BIGINT, primaryKey: true, autoIncrement: true },
     receivedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     source: { type: DataTypes.TEXT, allowNull: false },
+    orgSlug: { type: DataTypes.TEXT, allowNull: true },
     projectSlug: { type: DataTypes.TEXT, allowNull: true },
     issueTitle: { type: DataTypes.TEXT, allowNull: true },
     issueUrl: { type: DataTypes.TEXT, allowNull: true },

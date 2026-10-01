@@ -11,6 +11,7 @@ export class SeenIssue extends Model<
   InferAttributes<SeenIssue>,
   InferCreationAttributes<SeenIssue>
 > {
+  declare orgSlug: string
   declare projectSlug: string
   declare issueId: string
   declare seenAt: CreationOptional<Date>
@@ -20,6 +21,7 @@ export class SeenIssue extends Model<
 
 SeenIssue.init(
   {
+    orgSlug: { type: DataTypes.TEXT, primaryKey: true },
     projectSlug: { type: DataTypes.TEXT, primaryKey: true },
     issueId: { type: DataTypes.TEXT, primaryKey: true },
     seenAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },

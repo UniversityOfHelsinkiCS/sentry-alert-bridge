@@ -9,12 +9,17 @@ vi.mock('../../../src/server/sentry/api.js', async (importOriginal) => {
   return { ...actual, resolveIssue }
 })
 vi.mock('../../../src/server/db/seenIssues.js', () => ({ markIssueResolved }))
+vi.mock('../../../src/server/db/orgs.js', () => ({
+  getOrg: vi.fn(async (slug: string) => ({ slug, authToken: 'tok', baseUrl: null })),
+  listPollableOrgs: vi.fn(async () => [{ slug: 'sentry', authToken: 'tok', baseUrl: null }]),
+}))
 vi.mock('../../../src/server/db/deliveries.js', () => ({ recordDelivery }))
 
 const { SentryApiError } = await import('../../../src/server/sentry/api.js')
 const { handleResolveClick } = await import('../../../src/server/slack/resolve.js')
 
 const click = {
+  orgSlug: 'sentry',
   projectSlug: 'backend',
   issueId: '42',
   userId: 'U123',
@@ -39,8 +44,11 @@ describe('handleResolveClick', () => {
   it('resolves in Sentry, then releases the dedup claim', async () => {
     await handleResolveClick(click)
 
-    expect(resolveIssue).toHaveBeenCalledWith('42')
-    expect(markIssueResolved).toHaveBeenCalledWith('backend', '42')
+    expect(resolveIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: 'sentry' }),
+      '42',
+    )
+    expect(markIssueResolved).toHaveBeenCalledWith('sentry', 'backend', '42')
   })
 
   it('replaces the message and drops the button', async () => {

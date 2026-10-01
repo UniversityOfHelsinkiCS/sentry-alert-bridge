@@ -1,7 +1,8 @@
 import { recordDelivery } from '../db/deliveries.js'
+import { getOrg, listPollableOrgs } from '../db/orgs.js'
 import { markIssueResolved } from '../db/seenIssues.js'
 import { logger } from '../logger.js'
-import { SentryApiError, resolveIssue } from '../sentry/api.js'
+import { SentryApiError, resolveIssue, type SentryOrg } from '../sentry/api.js'
 import { markResolved } from './format.js'
 import type { ResolveClick } from './interactions.js'
 import { postToResponseUrl } from './respond.js'
@@ -16,21 +17,33 @@ function reasonFor(err: unknown): string {
   return err instanceof Error ? err.message : 'unknown error'
 }
 
-/**
- * Sentry first, then the database. The other order would drop the dedup row and
- * then fail to resolve, and the next poll would re-alert an issue that is still
- * open — a duplicate for no reason.
- */
+async function orgForClick(click: ResolveClick): Promise<SentryOrg | null> {
+  if (click.orgSlug !== null) return getOrg(click.orgSlug)
+  const orgs = await listPollableOrgs()
+  return orgs.length === 1 ? (orgs[0] ?? null) : null
+}
+
 export async function handleResolveClick(click: ResolveClick): Promise<void> {
   const { projectSlug, issueId, userId, responseUrl, blocks } = click
 
-  try {
-    await resolveIssue(issueId)
-  } catch (err) {
-    logger.error({ err, projectSlug, issueId }, 'sentry resolve failed')
+  const org = await orgForClick(click)
+  if (!org) {
+    await postToResponseUrl(responseUrl, {
+      response_type: 'ephemeral',
+      replace_original: false,
+      text:
+        click.orgSlug === null
+          ? '⚠️ This alert predates multi-org support, so the bridge cannot tell which Sentry organisation it came from. Resolve it in Sentry directly.'
+          : `⚠️ Sentry organisation ${click.orgSlug} is no longer configured in the bridge.`,
+    })
+    return
+  }
 
-    // The message keeps its button, so retrying is one click. Replacing it here
-    // would take that away and leave no way back.
+  try {
+    await resolveIssue(org, issueId)
+  } catch (err) {
+    logger.error({ err, orgSlug: org.slug, projectSlug, issueId }, 'sentry resolve failed')
+
     await postToResponseUrl(responseUrl, {
       response_type: 'ephemeral',
       replace_original: false,
@@ -39,6 +52,7 @@ export async function handleResolveClick(click: ResolveClick): Promise<void> {
 
     await recordDelivery({
       source: 'resolve',
+      orgSlug: org.slug,
       projectSlug,
       outcome: 'failed',
       detail: `resolve of issue ${issueId} failed: ${reasonFor(err)}`,
@@ -46,9 +60,7 @@ export async function handleResolveClick(click: ResolveClick): Promise<void> {
     return
   }
 
-  // Letting go of the claim is the whole point: it is what allows a later
-  // regression of this issue to alert again instead of being deduplicated.
-  await markIssueResolved(projectSlug, issueId)
+  await markIssueResolved(org.slug, projectSlug, issueId)
 
   await postToResponseUrl(responseUrl, {
     text: 'Issue resolved in Sentry',
@@ -58,10 +70,11 @@ export async function handleResolveClick(click: ResolveClick): Promise<void> {
 
   await recordDelivery({
     source: 'resolve',
+    orgSlug: org.slug,
     projectSlug,
     outcome: 'sent',
     detail: `issue ${issueId} resolved from Slack by ${userId}`,
   })
 
-  logger.info({ projectSlug, issueId, userId }, 'issue resolved from slack')
+  logger.info({ orgSlug: org.slug, projectSlug, issueId, userId }, 'issue resolved from slack')
 }

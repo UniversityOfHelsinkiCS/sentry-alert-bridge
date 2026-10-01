@@ -3,8 +3,17 @@ export type DeliveryOutcome = 'sent' | 'unrouted' | 'failed'
 export type IngestSource = 'polling' | 'test' | 'resolve'
 
 /** The issue shape the Sentry API client produces. */
+export interface OrgDto {
+  slug: string
+  name: string | null
+  hasToken: boolean
+  baseUrl: string | null
+  projectCount: number
+}
+
 export interface NormalizedIssue {
   id: string
+  orgSlug: string
   title: string
   culprit?: string | null
   level?: string | null
@@ -18,6 +27,7 @@ export interface NormalizedIssue {
 
 export interface DestinationDto {
   id: number
+  orgSlug: string
   label: string
   webhookUrl: string
   createdAt: string
@@ -47,6 +57,7 @@ export interface ProjectIssueDto {
 }
 
 export interface ProjectIssuesDto {
+  orgSlug: string
   projectSlug: string
   /** The route's start time: events before it are history and never alert. */
   alertsFrom: string
@@ -55,6 +66,7 @@ export interface ProjectIssuesDto {
 }
 
 export interface ProjectDto {
+  orgSlug: string
   slug: string
   name: string | null
   firstSeenAt: string
@@ -71,6 +83,7 @@ export interface DeliveryDto {
   id: string
   receivedAt: string
   source: IngestSource
+  orgSlug: string | null
   projectSlug: string | null
   issueTitle: string | null
   issueUrl: string | null

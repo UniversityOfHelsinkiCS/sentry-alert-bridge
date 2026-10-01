@@ -12,6 +12,7 @@ export class SlackDestination extends Model<
   InferCreationAttributes<SlackDestination>
 > {
   declare id: CreationOptional<number>
+  declare orgSlug: string
   declare label: string
   declare webhookUrl: string
   declare createdAt: CreationOptional<Date>
@@ -20,6 +21,7 @@ export class SlackDestination extends Model<
 SlackDestination.init(
   {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    orgSlug: { type: DataTypes.TEXT, allowNull: false },
     label: { type: DataTypes.TEXT, allowNull: false },
     webhookUrl: { type: DataTypes.TEXT, allowNull: false },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
