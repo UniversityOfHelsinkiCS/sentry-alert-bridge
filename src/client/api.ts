@@ -53,10 +53,15 @@ export const api = {
     request<ProjectIssuesDto>(`/projects/${encodeURIComponent(slug)}/issues`),
   addProject: (slug: string) =>
     request<ProjectDto[]>('/projects', { method: 'POST', ...body({ slug }) }),
-  setRoute: (slug: string, destinationId: number, enabled: boolean) =>
+  setRoute: (
+    slug: string,
+    destinationId: number,
+    enabled: boolean,
+    cooldownMinutes: number | null = null,
+  ) =>
     request<ProjectDto[]>(`/routes/${encodeURIComponent(slug)}`, {
       method: 'PUT',
-      ...body({ destinationId, enabled }),
+      ...body({ destinationId, enabled, cooldownMinutes }),
     }),
   clearRoute: (slug: string) =>
     request<ProjectDto[]>(`/routes/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
@@ -64,6 +69,11 @@ export const api = {
   destinations: () => request<DestinationDto[]>('/destinations'),
   addDestination: (label: string, webhookUrl: string) =>
     request<DestinationDto>('/destinations', { method: 'POST', ...body({ label, webhookUrl }) }),
+  updateDestination: (id: number, label: string, webhookUrl: string) =>
+    request<DestinationDto>(`/destinations/${id}`, {
+      method: 'PATCH',
+      ...body({ label, webhookUrl }),
+    }),
   deleteDestination: (id: number) =>
     request<{ ok: true }>(`/destinations/${id}`, { method: 'DELETE' }),
   testDestination: (id: number) =>
@@ -72,6 +82,12 @@ export const api = {
   deliveries: (limit = 100) => request<DeliveryDto[]>(`/deliveries?limit=${limit}`),
 
   settings: () => request<SettingsDto>('/settings'),
+  updateSettings: (
+    values: Pick<
+      SettingsDto,
+      'pollIntervalMinutes' | 'alertCooldownMinutes' | 'retentionDays'
+    >,
+  ) => request<SettingsDto>('/settings', { method: 'PATCH', ...body(values) }),
   pollNow: () => request<Record<string, number>>('/poll', { method: 'POST' }),
 }
 
@@ -83,14 +99,12 @@ export interface UseApi<T> {
   setData: (value: T) => void
 }
 
-/** Minimal data hook — one request per page is all this app needs. */
 export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []): UseApi<T> {
   const [data, setData] = useState<T>()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [nonce, setNonce] = useState(0)
 
-  // The fetcher is recreated on every render; the caller's deps decide reloads.
   const run = useCallback(fetcher, deps)
 
   useEffect(() => {

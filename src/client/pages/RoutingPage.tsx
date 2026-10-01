@@ -57,11 +57,6 @@ const VERDICTS: Record<
   },
 }
 
-/**
- * What the poller sees for one project, straight from Sentry, with the reason
- * each issue would or would not produce an alert. This is the answer to "I made
- * an error and nothing arrived".
- */
 function IssueDebugPanel({ slug }: { slug: string }) {
   const [state, setState] = useState<ProjectIssuesDto | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -155,23 +150,76 @@ function IssueDebugPanel({ slug }: { slug: string }) {
   )
 }
 
+function CooldownField({
+  value,
+  placeholder,
+  disabled,
+  onCommit,
+}: {
+  value: number | null
+  placeholder: number | null
+  disabled: boolean
+  onCommit: (minutes: number | null) => void
+}) {
+  const [draft, setDraft] = useState(value === null ? '' : String(value))
+
+  useEffect(() => {
+    setDraft(value === null ? '' : String(value))
+  }, [value])
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (trimmed === '') {
+      if (value !== null) onCommit(null)
+      return
+    }
+    const minutes = Number(trimmed)
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 1440) {
+      setDraft(value === null ? '' : String(value))
+      return
+    }
+    if (minutes !== value) onCommit(minutes)
+  }
+
+  return (
+    <TextField
+      size="small"
+      type="number"
+      fullWidth
+      disabled={disabled}
+      value={draft}
+      placeholder={placeholder === null ? '' : String(placeholder)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === 'Enter' && commit()}
+      inputProps={{ min: 0, max: 1440 }}
+      title="Minutes an issue stays quiet after alerting. Blank uses the global default."
+    />
+  )
+}
+
 export default function RoutingPage() {
   const projects = useApi(() => api.projects(), [])
   const destinations = useApi(() => api.destinations(), [])
+  const settings = useApi(() => api.settings(), [])
   const { show, toast } = useToast()
   const [newSlug, setNewSlug] = useState('')
   const [params] = useSearchParams()
   const [expanded, setExpanded] = useState<string | null>(null)
 
-  // Deliveries page deep-links here with ?project=<slug> to highlight a row.
   const highlight = params.get('project')
 
-  const save = async (project: ProjectDto, destinationId: number | null, enabled: boolean) => {
+  const save = async (
+    project: ProjectDto,
+    destinationId: number | null,
+    enabled: boolean,
+    cooldownMinutes: number | null = project.route?.cooldownMinutes ?? null,
+  ) => {
     try {
       const updated =
         destinationId === null
           ? await api.clearRoute(project.slug)
-          : await api.setRoute(project.slug, destinationId, enabled)
+          : await api.setRoute(project.slug, destinationId, enabled, cooldownMinutes)
       projects.setData(updated)
       show(destinationId === null ? `${project.slug} unrouted` : `${project.slug} saved`)
     } catch (err) {
@@ -191,12 +239,13 @@ export default function RoutingPage() {
     }
   }
 
-  if (projects.loading || destinations.loading) {
+  if (projects.loading || destinations.loading || settings.loading) {
     return <Skeleton variant="rectangular" height={320} />
   }
 
   const rows = projects.data ?? []
   const dests = destinations.data ?? []
+  const defaultCooldown = settings.data?.alertCooldownMinutes ?? null
 
   return (
     <Stack spacing={3}>
@@ -224,6 +273,7 @@ export default function RoutingPage() {
               <TableCell width={120} />
               <TableCell>Project</TableCell>
               <TableCell width="30%">Destination</TableCell>
+              <TableCell width={150}>Cooldown</TableCell>
               <TableCell align="center">Enabled</TableCell>
               <TableCell align="right">Last seen</TableCell>
             </TableRow>
@@ -231,7 +281,7 @@ export default function RoutingPage() {
           <TableBody>
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5}>
+                <TableCell colSpan={6}>
                   <Typography variant="body2" color="text.secondary">
                     No projects known yet.
                   </Typography>
@@ -246,8 +296,6 @@ export default function RoutingPage() {
                 hover
               >
                 <TableCell>
-                  {/* Only routed projects are polled, so only they have
-                      anything to explain. */}
                   {project.route && (
                     <Button
                       size="small"
@@ -305,6 +353,18 @@ export default function RoutingPage() {
                   </Select>
                 </TableCell>
 
+                <TableCell>
+                  <CooldownField
+                    disabled={!project.route}
+                    value={project.route?.cooldownMinutes ?? null}
+                    placeholder={defaultCooldown}
+                    onCommit={(minutes) =>
+                      project.route &&
+                      save(project, project.route.destinationId, project.route.enabled, minutes)
+                    }
+                  />
+                </TableCell>
+
                 <TableCell align="center">
                   <Switch
                     size="small"
@@ -324,7 +384,7 @@ export default function RoutingPage() {
               </TableRow>
 
               <TableRow>
-                <TableCell colSpan={5} sx={{ py: 0, border: 0 }}>
+                <TableCell colSpan={6} sx={{ py: 0, border: 0 }}>
                   <Collapse in={expanded === project.slug} unmountOnExit>
                     <IssueDebugPanel slug={project.slug} />
                   </Collapse>

@@ -12,13 +12,33 @@ vi.mock('../../../src/server/sentry/api.js', async () => {
   return { ...actual, listNewIssues, listOrgProjects }
 })
 vi.mock('../../../src/server/db/projects.js', () => ({ upsertProject: vi.fn(async () => undefined) }))
-vi.mock('../../../src/server/db/deliveries.js', () => ({ recordDelivery: vi.fn(async () => undefined) }))
-vi.mock('../../../src/server/db/settings.js', () => ({ touchLastPoll: vi.fn(async () => undefined) }))
-vi.mock('../../../src/server/db/seenIssues.js', () => ({ listClaimStates }))
+vi.mock('../../../src/server/db/deliveries.js', () => ({
+  recordDelivery: vi.fn(async () => undefined),
+  pruneDeliveries: vi.fn(async () => 0),
+}))
+vi.mock('../../../src/server/db/settings.js', () => ({
+  touchLastPoll: vi.fn(async () => undefined),
+  getSettings: vi.fn(async () => ({
+    lastPollAt: null,
+    pollIntervalMinutes: 5,
+    alertCooldownMinutes: 60,
+    retentionDays: 30,
+  })),
+}))
+vi.mock('../../../src/server/db/seenIssues.js', () => ({
+  listClaimStates,
+  pruneSeenIssues: vi.fn(async () => 0),
+}))
 const ROUTED_AT = new Date(Date.now() - 24 * 60 * 60_000)
 vi.mock('../../../src/server/db/routes.js', () => ({
   listEnabledRoutes: vi.fn(async () => [
-    { projectSlug: 'backend', destinationId: 1, enabled: true, alertsFrom: ROUTED_AT },
+    {
+      projectSlug: 'backend',
+      destinationId: 1,
+      enabled: true,
+      alertsFrom: ROUTED_AT,
+      cooldownMinutes: null,
+    },
   ]),
 }))
 

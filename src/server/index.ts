@@ -8,7 +8,7 @@ import { startSlackSocket, stopSlackSocket } from './slack/socket.js'
 async function main(): Promise<void> {
   await connectToDatabase()
 
-  startPoller()
+  await startPoller()
   startSlackSocket()
 
   const server = createApp().listen(config.PORT, () => {

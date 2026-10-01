@@ -1,8 +1,7 @@
 import type { DestinationDto } from '../../shared/types.js'
-import { Delivery, SlackDestination } from './models.js'
+import { Delivery, SlackDestination } from './model/index.js'
 
 async function toDto(destination: SlackDestination): Promise<DestinationDto> {
-  // One extra query per destination, and there are only ever a handful of them.
   const last = await Delivery.findOne({
     where: { destinationId: destination.id },
     order: [['receivedAt', 'DESC']],
@@ -28,6 +27,17 @@ export async function createDestination(
   webhookUrl: string,
 ): Promise<DestinationDto> {
   const destination = await SlackDestination.create({ label, webhookUrl })
+  return toDto(destination)
+}
+
+export async function updateDestination(
+  id: number,
+  label: string,
+  webhookUrl: string,
+): Promise<DestinationDto | null> {
+  const destination = await SlackDestination.findByPk(id)
+  if (!destination) return null
+  await destination.update({ label, webhookUrl })
   return toDto(destination)
 }
 

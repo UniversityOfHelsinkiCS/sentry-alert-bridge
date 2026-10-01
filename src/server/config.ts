@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { z } from 'zod'
+import { DEFAULTS } from './defaults.js'
 
 /**
  * The only module in the app that reads process.env. Everything else imports
@@ -17,13 +18,19 @@ const schema = z.object({
 
   SENTRY_BASE_URL: z.string().url().default('https://toska.it.helsinki.fi'),
   SENTRY_ORG_SLUG: z.string().min(1).default('sentry'),
-  // Polling is the only way issues reach the app, so without this there is
-  // nothing the app can do.
   SENTRY_AUTH_TOKEN: z.string().min(1, 'SENTRY_AUTH_TOKEN is required'),
-  POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(5),
-  // How long one issue stays quiet after alerting, however often it fires.
-  // 0 means "alert on every poll that sees new events".
-  ALERT_COOLDOWN_MINUTES: z.coerce.number().int().min(0).max(1440).default(60),
+  POLL_INTERVAL_MINUTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1440)
+    .default(DEFAULTS.pollIntervalMinutes),
+  ALERT_COOLDOWN_MINUTES: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(1440)
+    .default(DEFAULTS.alertCooldownMinutes),
 
   // Socket Mode app-level token, for the Resolve button in Slack alerts.
   // Optional: without it the app behaves exactly as before, minus the button.

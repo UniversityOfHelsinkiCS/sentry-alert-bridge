@@ -1,5 +1,6 @@
+import { Op } from 'sequelize'
 import type { DeliveryDto, DeliveryOutcome, IngestSource } from '../../shared/types.js'
-import { Delivery, Route, SlackDestination } from './models.js'
+import { Delivery, Route, SlackDestination } from './model/index.js'
 
 export interface RecordDelivery {
   source: IngestSource
@@ -47,6 +48,10 @@ export async function listDeliveries(limit: number): Promise<DeliveryDto[]> {
     outcome: row.outcome,
     detail: row.detail,
   }))
+}
+
+export async function pruneDeliveries(before: Date): Promise<number> {
+  return Delivery.destroy({ where: { receivedAt: { [Op.lt]: before } } })
 }
 
 export async function countRoutesUsing(destinationId: number): Promise<number> {

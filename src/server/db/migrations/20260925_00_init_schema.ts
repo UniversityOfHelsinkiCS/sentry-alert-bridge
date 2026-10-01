@@ -2,11 +2,6 @@ import { DataTypes, literal } from 'sequelize'
 
 import type { Migration } from '../connection.js'
 
-/**
- * Everything runs in one transaction. Umzug does not wrap migrations itself,
- * and postgres does transactional DDL, so this is what stops a failure halfway
- * through from leaving the schema half-built and the migration unrecorded.
- */
 export const up: Migration = async ({ context: queryInterface }) => {
   await queryInterface.sequelize.transaction(async (transaction) => {
     await queryInterface.createTable(
@@ -62,7 +57,6 @@ export const up: Migration = async ({ context: queryInterface }) => {
       { transaction },
     )
 
-    // A single settings row, enforced by the database rather than by convention.
     await queryInterface.addConstraint('settings', {
       type: 'check',
       name: 'settings_single_row',
@@ -71,8 +65,6 @@ export const up: Migration = async ({ context: queryInterface }) => {
       transaction,
     })
 
-    // bulkInsert has no on-conflict option, and seeding the row must stay
-    // harmless against a database that already has it.
     await queryInterface.sequelize.query(
       'insert into settings (id) values (1) on conflict do nothing',
       { transaction },
@@ -119,7 +111,6 @@ export const up: Migration = async ({ context: queryInterface }) => {
 
 export const down: Migration = async ({ context: queryInterface }) => {
   await queryInterface.sequelize.transaction(async (transaction) => {
-    // Dropped children first: routes and deliveries reference slack_destinations.
     await queryInterface.dropTable('deliveries', { transaction })
     await queryInterface.dropTable('seen_issues', { transaction })
     await queryInterface.dropTable('settings', { transaction })

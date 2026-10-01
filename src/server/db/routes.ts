@@ -1,11 +1,11 @@
-import { Route as RouteModel } from './models.js'
+import { Route as RouteModel } from './model/index.js'
 
 export interface Route {
   projectSlug: string
   destinationId: number
   enabled: boolean
-  /** Events before this are history and never alert. Set when the route is made. */
   alertsFrom: Date
+  cooldownMinutes: number | null
 }
 
 const toRoute = (row: RouteModel): Route => ({
@@ -13,6 +13,7 @@ const toRoute = (row: RouteModel): Route => ({
   destinationId: row.destinationId,
   enabled: row.enabled,
   alertsFrom: row.alertsFrom,
+  cooldownMinutes: row.cooldownMinutes,
 })
 
 export async function getRoute(projectSlug: string): Promise<Route | null> {
@@ -20,7 +21,6 @@ export async function getRoute(projectSlug: string): Promise<Route | null> {
   return row ? toRoute(row) : null
 }
 
-/** Project slugs the poller should ask Sentry about. */
 export async function listEnabledRoutes(): Promise<Route[]> {
   const rows = await RouteModel.findAll({
     where: { enabled: true },
@@ -33,8 +33,15 @@ export async function upsertRoute(
   projectSlug: string,
   destinationId: number,
   enabled: boolean,
+  cooldownMinutes: number | null,
 ): Promise<void> {
-  await RouteModel.upsert({ projectSlug, destinationId, enabled, updatedAt: new Date() })
+  await RouteModel.upsert({
+    projectSlug,
+    destinationId,
+    enabled,
+    cooldownMinutes,
+    updatedAt: new Date(),
+  })
 }
 
 export async function deleteRoute(projectSlug: string): Promise<void> {
