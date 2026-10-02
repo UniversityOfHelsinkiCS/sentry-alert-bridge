@@ -100,3 +100,33 @@ describe('markResolved', () => {
     expect(JSON.stringify(updated)).toContain(issue.title)
   })
 })
+
+describe('formatIssue stack frame', () => {
+  const frame = '/opt/app-root/src/src/server/updater/util.ts:27:20 in safeBulkCreate'
+
+  it('shows the frame alongside the culprit', () => {
+    const json = JSON.stringify(formatIssue({ ...issue, frame }).blocks)
+    expect(json).toContain('/opt/app-root/src/src/server/updater/util.ts:27:20')
+    expect(json).toContain('safeBulkCreate')
+    expect(json).toContain(issue.culprit as string)
+  })
+
+  it('adds no frame block when the stack trace was unavailable', () => {
+    const before = formatIssue(issue).blocks.length
+    expect(formatIssue({ ...issue, frame: null }).blocks).toHaveLength(before)
+  })
+
+  it('truncates a long path from the left so the filename stays visible', () => {
+    const long = `/${'deep/'.repeat(40)}util.ts:27:20 in safeBulkCreate`
+    const json = JSON.stringify(formatIssue({ ...issue, frame: long }).blocks)
+    expect(json).toContain('…')
+    expect(json).toContain('util.ts:27:20')
+    expect(json).toContain('safeBulkCreate')
+    expect(json).not.toContain('/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep/deep')
+  })
+
+  it('escapes a frame that looks like markup', () => {
+    const json = JSON.stringify(formatIssue({ ...issue, frame: '<anonymous>:1:1' }).blocks)
+    expect(json).toContain('&lt;anonymous&gt;')
+  })
+})

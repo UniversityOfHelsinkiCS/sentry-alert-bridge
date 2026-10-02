@@ -6,12 +6,13 @@ const ORG = { slug: 'sentry', authToken: 'tok', baseUrl: null }
 const listNewIssues =
   vi.fn<(org: typeof ORG, slug: string, limit?: number) => Promise<ApiIssue[]>>()
 const listOrgProjects = vi.fn(async () => [{ slug: 'backend', name: 'Backend' }])
+const getLatestEvent = vi.fn<() => Promise<unknown>>(async () => null)
 const listClaimStates = vi.fn(async () => new Map<string, { alertedAt: Date | null; releasedAt: Date | null }>())
 
 vi.mock('../../../src/server/ingest/index.js', () => ({ handleIssue }))
 vi.mock('../../../src/server/sentry/api.js', async () => {
   const actual = await vi.importActual<typeof import('../../../src/server/sentry/api.js')>('../../../src/server/sentry/api.js')
-  return { ...actual, listNewIssues, listOrgProjects }
+  return { ...actual, listNewIssues, listOrgProjects, getLatestEvent }
 })
 vi.mock('../../../src/server/db/projects.js', () => ({ upsertProject: vi.fn(async () => undefined) }))
 vi.mock('../../../src/server/db/orgs.js', () => ({ listPollableOrgs: vi.fn(async () => [ORG]) }))
@@ -63,6 +64,54 @@ describe('pollOnce', () => {
     listNewIssues.mockReset()
     listClaimStates.mockClear()
     listClaimStates.mockResolvedValue(new Map())
+    getLatestEvent.mockReset()
+    getLatestEvent.mockResolvedValue(null)
+  })
+
+  it('attaches the deepest in-app frame of the latest event', async () => {
+    listNewIssues.mockResolvedValue([issue('framed', 1)])
+    getLatestEvent.mockResolvedValue({
+      entries: [
+        {
+          type: 'exception',
+          data: {
+            values: [
+              {
+                stacktrace: {
+                  frames: [
+                    { absPath: '/app/node_modules/pg/index.js', lineNo: 3, inApp: false },
+                    { absPath: '/app/src/server/updater/util.ts', lineNo: 27, colNo: 20, function: 'safeBulkCreate', inApp: true },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ],
+    })
+
+    await pollOnce()
+
+    expect(handleIssue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        frame: '/app/src/server/updater/util.ts:27:20 in safeBulkCreate',
+      }),
+      'polling',
+    )
+  })
+
+  // A missing or forbidden event must never cost us the alert itself.
+  it('still alerts when the latest event cannot be fetched', async () => {
+    listNewIssues.mockResolvedValue([issue('unframed', 1)])
+    getLatestEvent.mockRejectedValue(new Error('403'))
+
+    const summary = await pollOnce()
+
+    expect(summary.sent).toBe(1)
+    expect(handleIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'unframed', frame: null }),
+      'polling',
+    )
   })
 
   it('alerts on an issue it has never alerted on', async () => {

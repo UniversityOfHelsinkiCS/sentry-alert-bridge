@@ -1,7 +1,13 @@
 import { z } from 'zod'
 import type { NormalizedIssue } from '../../shared/types.js'
 import { config } from '../config.js'
-import { apiIssueSchema, apiProjectSchema, type ApiIssue } from './types.js'
+import {
+  apiEventSchema,
+  apiIssueSchema,
+  apiProjectSchema,
+  type ApiEvent,
+  type ApiIssue,
+} from './types.js'
 
 export class SentryApiError extends Error {
   constructor(
@@ -104,6 +110,12 @@ export async function listNewIssues(
   return parsed.data
 }
 
+export async function getLatestEvent(org: SentryOrg, issueId: string): Promise<ApiEvent | null> {
+  const body = await get(org, `/api/0/issues/${encodeURIComponent(issueId)}/events/latest/`)
+  const parsed = apiEventSchema.safeParse(body)
+  return parsed.success ? parsed.data : null
+}
+
 export async function resolveIssue(org: SentryOrg, issueId: string): Promise<void> {
   await request(org, `/api/0/issues/${encodeURIComponent(issueId)}/`, {
     method: 'PUT',
@@ -116,6 +128,7 @@ export function normalizeApiIssue(
   issue: ApiIssue,
   projectSlug: string,
   projectName: string | null,
+  frame: string | null = null,
 ): NormalizedIssue {
   return {
     id: issue.id,
@@ -134,5 +147,6 @@ export function normalizeApiIssue(
     projectSlug,
     projectName,
     environment: null,
+    frame,
   }
 }

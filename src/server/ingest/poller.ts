@@ -1,19 +1,22 @@
 import { pruneDeliveries, recordDelivery } from '../db/deliveries.js'
 import { listPollableOrgs } from '../db/orgs.js'
 import { upsertProject } from '../db/projects.js'
-import { listEnabledRoutes } from '../db/routes.js'
+import { listEnabledRoutes, type Route } from '../db/routes.js'
 import { listClaimStates, pruneSeenIssues } from '../db/seenIssues.js'
 import { getSettings, touchLastPoll } from '../db/settings.js'
 import { decideAlert } from './decide.js'
 import { logger } from '../logger.js'
+import { topFrame } from '../sentry/frame.js'
 import {
+  getLatestEvent,
   listNewIssues,
   listOrgProjects,
   normalizeApiIssue,
   SentryApiError,
   type SentryOrg,
 } from '../sentry/api.js'
-import { handleIssue } from './index.js'
+import type { ApiIssue } from '../sentry/types.js'
+import { handleIssue, type IngestResult } from './index.js'
 
 const PER_PROJECT_DELAY_MS = 200
 
@@ -49,11 +52,15 @@ async function prune(retentionDays: number): Promise<void> {
   }
 }
 
-async function pollOrg(
+/**
+ * Mirrors the org's projects into our own table and returns their display
+ * names. A plain failure still lets the routed projects be polled from what we
+ * already know; being rate limited does not, so it is reported separately.
+ */
+async function syncProjectNames(
   org: SentryOrg,
-  defaultCooldownMinutes: number,
   summary: PollSummary,
-): Promise<void> {
+): Promise<{ names: Map<string, string | null>; rateLimited: boolean }> {
   const names = new Map<string, string | null>()
 
   try {
@@ -71,46 +78,93 @@ async function pollOrg(
       outcome: 'failed',
       detail: `could not list projects: ${err instanceof Error ? err.message : 'unknown error'}`,
     })
-    if (err instanceof SentryApiError && err.isRateLimited) return
+    return { names, rateLimited: err instanceof SentryApiError && err.isRateLimited }
   }
+
+  return { names, rateLimited: false }
+}
+
+/** Best effort: no stack frame is a worse alert, never a missing one. */
+async function frameFor(org: SentryOrg, issueId: string): Promise<string | null> {
+  try {
+    return topFrame(await getLatestEvent(org, issueId))
+  } catch (err) {
+    logger.debug(
+      { err, orgSlug: org.slug, issueId },
+      'could not read the latest event for a stack frame',
+    )
+    return null
+  }
+}
+
+function countResult(summary: PollSummary, result: IngestResult): void {
+  if (result === 'sent') summary.sent++
+  else if (result === 'unrouted') summary.unrouted++
+  else summary.failed++
+}
+
+interface AlertContext {
+  org: SentryOrg
+  route: Route
+  projectName: string | null
+  defaultCooldownMinutes: number
+  summary: PollSummary
+}
+
+/** Sends an alert for each issue the cooldown and the route's start date allow. */
+async function alertOnIssues(issues: ApiIssue[], ctx: AlertContext): Promise<void> {
+  const { org, route, summary } = ctx
+  const states = await listClaimStates(org.slug, route.projectSlug)
+
+  for (const issue of issues) {
+    const decision = decideAlert({
+      lastSeen: issue.lastSeen,
+      alertsFrom: route.alertsFrom,
+      state: states.get(issue.id),
+      cooldownMs: (route.cooldownMinutes ?? ctx.defaultCooldownMinutes) * 60_000,
+    })
+
+    if (decision !== 'alert') {
+      summary.skipped++
+      logger.debug(
+        { orgSlug: org.slug, projectSlug: route.projectSlug, issueId: issue.id, decision },
+        'issue not alertable',
+      )
+      continue
+    }
+
+    const normalized = normalizeApiIssue(
+      org,
+      issue,
+      route.projectSlug,
+      ctx.projectName,
+      await frameFor(org, issue.id),
+    )
+
+    countResult(summary, await handleIssue(normalized, 'polling'))
+  }
+}
+
+async function pollOrg(
+  org: SentryOrg,
+  defaultCooldownMinutes: number,
+  summary: PollSummary,
+): Promise<void> {
+  const { names, rateLimited } = await syncProjectNames(org, summary)
+  if (rateLimited) return
 
   for (const route of await listEnabledRoutes(org.slug)) {
     try {
       const issues = await listNewIssues(org, route.projectSlug)
       summary.polled++
 
-      const states = await listClaimStates(org.slug, route.projectSlug)
-
-      for (const issue of issues) {
-        const decision = decideAlert({
-          lastSeen: issue.lastSeen,
-          alertsFrom: route.alertsFrom,
-          state: states.get(issue.id),
-          cooldownMs: (route.cooldownMinutes ?? defaultCooldownMinutes) * 60_000,
-        })
-
-        if (decision !== 'alert') {
-          summary.skipped++
-          logger.debug(
-            { orgSlug: org.slug, projectSlug: route.projectSlug, issueId: issue.id, decision },
-            'issue not alertable',
-          )
-          continue
-        }
-
-        const result = await handleIssue(
-          normalizeApiIssue(
-            org,
-            issue,
-            route.projectSlug,
-            names.get(route.projectSlug) ?? null,
-          ),
-          'polling',
-        )
-        if (result === 'sent') summary.sent++
-        else if (result === 'unrouted') summary.unrouted++
-        else summary.failed++
-      }
+      await alertOnIssues(issues, {
+        org,
+        route,
+        projectName: names.get(route.projectSlug) ?? null,
+        defaultCooldownMinutes,
+        summary,
+      })
     } catch (err) {
       summary.failed++
       logger.error({ err, orgSlug: org.slug, projectSlug: route.projectSlug }, 'poll failed for project')

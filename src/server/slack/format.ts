@@ -21,6 +21,20 @@ function field(label: string, value: string | null | undefined) {
   return { type: 'mrkdwn' as const, text: `*${label}*\n${escape(value)}` }
 }
 
+const FRAME_MAX_LENGTH = 110
+
+/** Container paths are long and front-loaded with noise, so keep the tail. */
+function truncateLeft(text: string): string {
+  if (text.length <= FRAME_MAX_LENGTH) return text
+  return `…${text.slice(text.length - FRAME_MAX_LENGTH + 1)}`
+}
+
+function frameText(frame: string): string {
+  const match = /^(.*?) in (.+)$/.exec(frame)
+  if (!match) return `📍 \`${escape(truncateLeft(frame))}\``
+  return `📍 \`${escape(truncateLeft(match[1] ?? ''))}\` in \`${escape(match[2] ?? '')}\``
+}
+
 export interface SlackMessage {
   text: string
   blocks: unknown[]
@@ -86,6 +100,13 @@ export function formatIssue(issue: NormalizedIssue, options: FormatOptions = {})
     })
   }
 
+  if (issue.frame) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: frameText(issue.frame) }],
+    })
+  }
+
   if (fields.length > 0) blocks.push({ type: 'section', fields: fields.slice(0, 10) })
 
   if (options.resolvable) blocks.push(resolveButton(issue))
@@ -124,5 +145,6 @@ export function testIssue(): NormalizedIssue {
     projectSlug: 'sentry-alert-bridge',
     projectName: 'sentry-alert-bridge',
     environment: 'test',
+    frame: '/opt/app-root/src/src/server/updater/util.ts:27:20 in safeBulkCreate',
   }
 }

@@ -23,6 +23,8 @@ export interface NormalizedIssue {
   projectSlug: string
   projectName?: string | null
   environment?: string | null
+  /** Deepest in-app stack frame of the latest event, when one could be read. */
+  frame?: string | null
 }
 
 export interface DestinationDto {
