@@ -20,6 +20,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { MAX_COOLDOWN_MINUTES } from '../../shared/types'
 import type { IssueVerdict, ProjectDto, ProjectIssuesDto } from '../../shared/types'
 import { api, useApi } from '../api'
 import { useOrg } from '../OrgContext'
@@ -175,7 +176,7 @@ function CooldownField({
       return
     }
     const minutes = Number(trimmed)
-    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 1440) {
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > MAX_COOLDOWN_MINUTES) {
       setDraft(value === null ? '' : String(value))
       return
     }
@@ -193,7 +194,7 @@ function CooldownField({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => e.key === 'Enter' && commit()}
-      inputProps={{ min: 0, max: 1440 }}
+      inputProps={{ min: 0, max: MAX_COOLDOWN_MINUTES }}
       title="Minutes an issue stays quiet after alerting. Blank uses the global default."
     />
   )

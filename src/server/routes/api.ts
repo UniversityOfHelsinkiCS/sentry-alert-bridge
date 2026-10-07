@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import { z } from 'zod'
+import { MAX_COOLDOWN_MINUTES } from '../../shared/types.js'
 import type { ProjectIssuesDto, SettingsDto } from '../../shared/types.js'
 import { requireAuth } from '../auth/middleware.js'
 import { countRoutesUsing, listDeliveries, recordDelivery } from '../db/deliveries.js'
@@ -238,7 +239,7 @@ apiRouter.put('/routes/:slug', async (req, res) => {
     .object({
       destinationId: z.number().int().positive(),
       enabled: z.boolean().default(true),
-      cooldownMinutes: z.number().int().min(0).max(1440).nullable().default(null),
+      cooldownMinutes: z.number().int().min(0).max(MAX_COOLDOWN_MINUTES).nullable().default(null),
     })
     .safeParse(req.body)
 
@@ -399,7 +400,7 @@ apiRouter.patch('/settings', async (req, res) => {
   const parsed = z
     .object({
       pollIntervalMinutes: z.number().int().min(1).max(1440),
-      alertCooldownMinutes: z.number().int().min(0).max(1440),
+      alertCooldownMinutes: z.number().int().min(0).max(MAX_COOLDOWN_MINUTES),
       retentionDays: z.number().int().min(1).max(3650),
     })
     .safeParse(req.body)

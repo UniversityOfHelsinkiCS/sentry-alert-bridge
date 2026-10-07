@@ -1,3 +1,5 @@
+export const MAX_COOLDOWN_MINUTES = 52_560_000
+
 export type DeliveryOutcome = 'sent' | 'unrouted' | 'failed'
 
 export type IngestSource = 'polling' | 'test' | 'resolve'

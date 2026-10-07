@@ -7,12 +7,13 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { useEffect, useState } from 'react'
+import { MAX_COOLDOWN_MINUTES } from '../../shared/types'
 import { api, useApi } from '../api'
 import { errorMessage, useToast } from '../useToast'
 
 const BOUNDS = {
   pollIntervalMinutes: { min: 1, max: 1440 },
-  alertCooldownMinutes: { min: 0, max: 1440 },
+  alertCooldownMinutes: { min: 0, max: MAX_COOLDOWN_MINUTES },
   retentionDays: { min: 1, max: 3650 },
 }
 

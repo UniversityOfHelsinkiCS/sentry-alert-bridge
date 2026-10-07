@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { z } from 'zod'
+import { MAX_COOLDOWN_MINUTES } from '../shared/types.js'
 import { DEFAULTS } from './defaults.js'
 
 const schema = z.object({
@@ -25,7 +26,7 @@ const schema = z.object({
     .number()
     .int()
     .min(0)
-    .max(1440)
+    .max(MAX_COOLDOWN_MINUTES)
     .default(DEFAULTS.alertCooldownMinutes),
 
   SLACK_APP_TOKEN: z.string().startsWith('xapp-').optional(),
