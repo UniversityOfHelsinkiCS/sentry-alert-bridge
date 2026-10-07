@@ -3,6 +3,10 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Collapse from '@mui/material/Collapse'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
 import MenuItem from '@mui/material/MenuItem'
@@ -23,7 +27,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { MAX_COOLDOWN_MINUTES } from '../../shared/types'
 import type { IssueVerdict, ProjectDto, ProjectIssuesDto } from '../../shared/types'
 import { api, useApi } from '../api'
-import { useOrg } from '../OrgContext'
+import { useOrg, useOrgState } from '../OrgContext'
 import { errorMessage, useToast } from '../useToast'
 
 const UNROUTED = ''
@@ -51,6 +55,11 @@ const VERDICTS: Record<
     label: 'in cooldown',
     color: 'warning',
     why: 'It has fired again, but too soon after the last alert.',
+  },
+  recap: {
+    label: 'recap',
+    color: 'default',
+    why: 'Matches a recap rule, so it waits for this project’s next recap instead of alerting.',
   },
   unknown: {
     label: 'no last seen',
@@ -152,6 +161,209 @@ function IssueDebugPanel({ org, slug }: { org: string; slug: string }) {
   )
 }
 
+type RouteInfo = NonNullable<ProjectDto['route']>
+
+function recapSummary(route: RouteInfo): string {
+  const rules = `${route.recapPatterns.length} ${route.recapPatterns.length === 1 ? 'rule' : 'rules'}`
+  if (route.recapTimes.length === 0) return `${rules} · no times`
+  return `${rules} · ${route.recapTimes.join(', ')}`
+}
+
+function RecapCell({ route, onOpen }: { route: RouteInfo | null; onOpen: () => void }) {
+  if (!route) {
+    return (
+      <Typography variant="caption" color="text.secondary">
+        —
+      </Typography>
+    )
+  }
+
+  const configured = route.recapPatterns.length > 0 || route.recapTimes.length > 0
+
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Button size="small" variant="text" onClick={onOpen} sx={{ textTransform: 'none' }}>
+        {configured ? recapSummary(route) : 'Set up'}
+      </Button>
+      {route.recapQueuedCount > 0 && (
+        <Chip size="small" color="info" label={route.recapQueuedCount} />
+      )}
+    </Stack>
+  )
+}
+
+function isValidRegex(pattern: string): boolean {
+  try {
+    new RegExp(pattern)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function RecapDialog({
+  org,
+  project,
+  timezone,
+  onClose,
+  onSaved,
+}: {
+  org: string
+  project: ProjectDto
+  timezone: string | null
+  onClose: () => void
+  onSaved: (projects: ProjectDto[]) => void
+}) {
+  const route = project.route
+  const [patterns, setPatterns] = useState<string[]>(route?.recapPatterns ?? [])
+  const [times, setTimes] = useState<string[]>(route?.recapTimes ?? [])
+  const [formError, setFormError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [sending, setSending] = useState(false)
+
+  const cleanPatterns = patterns.map((p) => p.trim()).filter((p) => p !== '')
+  const cleanTimes = times.map((t) => t.trim()).filter((t) => t !== '')
+  const valid = cleanPatterns.every(isValidRegex)
+
+  const save = async () => {
+    setFormError(null)
+    setSaving(true)
+    try {
+      onSaved(await api.setRouteRecap(org, project.slug, cleanPatterns, cleanTimes))
+      onClose()
+    } catch (err) {
+      setFormError(errorMessage(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const sendNow = async () => {
+    setFormError(null)
+    setSending(true)
+    try {
+      const result = await api.sendRecapNow(org, project.slug)
+      setFormError(
+        result.sent
+          ? `sent a recap with ${result.issues} issues`
+          : 'nothing is queued for this project yet',
+      )
+    } catch (err) {
+      setFormError(errorMessage(err))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <Dialog open fullWidth maxWidth="sm" onClose={onClose}>
+      <DialogTitle>Recap for {project.name ?? project.slug}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={3} sx={{ mt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Issues whose title or culprit matches any of these patterns are not alerted on
+            immediately. They are collected and delivered as one message at each time below.
+          </Typography>
+
+          {formError && <Alert severity="info">{formError}</Alert>}
+
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">Patterns</Typography>
+            {patterns.length === 0 && (
+              <Typography variant="caption" color="text.secondary">
+                No patterns yet — every issue alerts immediately.
+              </Typography>
+            )}
+            {patterns.map((pattern, index) => (
+              <Stack key={index} direction="row" spacing={1} alignItems="center">
+                <TextField
+                  size="small"
+                  fullWidth
+                  value={pattern}
+                  placeholder="^Timeout"
+                  error={pattern.trim() !== '' && !isValidRegex(pattern.trim())}
+                  onChange={(e) =>
+                    setPatterns(patterns.map((p, i) => (i === index ? e.target.value : p)))
+                  }
+                />
+                <Button
+                  size="small"
+                  color="inherit"
+                  onClick={() => setPatterns(patterns.filter((_, i) => i !== index))}
+                >
+                  Remove
+                </Button>
+              </Stack>
+            ))}
+            <Box>
+              <Button size="small" onClick={() => setPatterns([...patterns, ''])}>
+                Add pattern
+              </Button>
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              Case-insensitive and unanchored, so <code>Timeout</code> matches anywhere in the
+              title or culprit.
+            </Typography>
+          </Stack>
+
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">Times</Typography>
+            {times.length === 0 && (
+              <Typography variant="caption" color="text.secondary">
+                No times yet — matched issues stay queued until you add one.
+              </Typography>
+            )}
+            {times.map((time, index) => (
+              <Stack key={index} direction="row" spacing={1} alignItems="center">
+                <TextField
+                  size="small"
+                  type="time"
+                  value={time}
+                  onChange={(e) =>
+                    setTimes(times.map((t, i) => (i === index ? e.target.value : t)))
+                  }
+                  sx={{ maxWidth: 160 }}
+                />
+                <Button
+                  size="small"
+                  color="inherit"
+                  onClick={() => setTimes(times.filter((_, i) => i !== index))}
+                >
+                  Remove
+                </Button>
+              </Stack>
+            ))}
+            <Box>
+              <Button size="small" onClick={() => setTimes([...times, '09:00'])}>
+                Add time
+              </Button>
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              Read in {timezone ?? 'the server time zone'}, set on the Organisations page.
+            </Typography>
+          </Stack>
+
+          {route && route.recapQueuedCount > 0 && (
+            <Typography variant="body2" color="text.secondary">
+              {route.recapQueuedCount} issues are queued right now.
+            </Typography>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={sendNow} disabled={sending || !route}>
+          {sending ? 'Sending…' : 'Send recap now'}
+        </Button>
+        <Box sx={{ flexGrow: 1 }} />
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={save} disabled={saving || !valid}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
 function CooldownField({
   value,
   placeholder,
@@ -202,6 +414,7 @@ function CooldownField({
 
 export default function RoutingPage() {
   const org = useOrg()
+  const { orgs } = useOrgState()
   const projects = useApi(() => api.projects(org), [org])
   const destinations = useApi(() => api.destinations(org), [org])
   const settings = useApi(() => api.settings(), [])
@@ -209,6 +422,7 @@ export default function RoutingPage() {
   const [newSlug, setNewSlug] = useState('')
   const [params] = useSearchParams()
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [recapFor, setRecapFor] = useState<ProjectDto | null>(null)
 
   const highlight = params.get('project')
 
@@ -249,6 +463,7 @@ export default function RoutingPage() {
   const rows = projects.data ?? []
   const dests = destinations.data ?? []
   const defaultCooldown = settings.data?.alertCooldownMinutes ?? null
+  const timezone = orgs.find((o) => o.slug === org)?.timezone ?? null
 
   return (
     <Stack spacing={3}>
@@ -269,6 +484,19 @@ export default function RoutingPage() {
         </Alert>
       )}
 
+      {recapFor && (
+        <RecapDialog
+          org={org}
+          project={recapFor}
+          timezone={timezone}
+          onClose={() => setRecapFor(null)}
+          onSaved={(updated) => {
+            projects.setData(updated)
+            show('recap settings saved')
+          }}
+        />
+      )}
+
       <Paper variant="outlined">
         <Table size="small">
           <TableHead>
@@ -277,6 +505,7 @@ export default function RoutingPage() {
               <TableCell>Project</TableCell>
               <TableCell width="30%">Destination</TableCell>
               <TableCell width={150}>Cooldown</TableCell>
+              <TableCell width={150}>Recap</TableCell>
               <TableCell align="center">Enabled</TableCell>
               <TableCell align="right">Last seen</TableCell>
             </TableRow>
@@ -284,7 +513,7 @@ export default function RoutingPage() {
           <TableBody>
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6}>
+                <TableCell colSpan={7}>
                   <Typography variant="body2" color="text.secondary">
                     No projects known yet.
                   </Typography>
@@ -368,6 +597,13 @@ export default function RoutingPage() {
                   />
                 </TableCell>
 
+                <TableCell>
+                  <RecapCell
+                    route={project.route}
+                    onOpen={() => setRecapFor(project)}
+                  />
+                </TableCell>
+
                 <TableCell align="center">
                   <Switch
                     size="small"
@@ -387,7 +623,7 @@ export default function RoutingPage() {
               </TableRow>
 
               <TableRow>
-                <TableCell colSpan={6} sx={{ py: 0, border: 0 }}>
+                <TableCell colSpan={7} sx={{ py: 0, border: 0 }}>
                   <Collapse in={expanded === project.slug} unmountOnExit>
                     <IssueDebugPanel org={org} slug={project.slug} />
                   </Collapse>

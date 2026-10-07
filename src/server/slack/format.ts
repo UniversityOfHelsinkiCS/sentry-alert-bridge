@@ -117,6 +117,90 @@ export function formatIssue(issue: NormalizedIssue, options: FormatOptions = {})
   }
 }
 
+export interface RecapIssue {
+  issueTitle: string
+  issueUrl: string
+  level: string | null
+  eventCount: number | null
+  occurrences: number
+}
+
+export interface RecapMessageInput {
+  projectLabel: string
+  issues: RecapIssue[]
+  since: Date | null
+  timeZone: string
+}
+
+const RECAP_MAX_ISSUES = 50
+const RECAP_SECTION_MAX_CHARS = 2800
+
+function recapLine(issue: RecapIssue): string {
+  const heading = `<${issue.issueUrl}|${escape(issue.issueTitle)}>`
+  const parts = [`${emojiFor(issue.level)} ${heading}`]
+
+  if (issue.eventCount !== null) parts.push(`${issue.eventCount} events`)
+  if (issue.occurrences > 1) parts.push(`seen ${issue.occurrences}\u00d7`)
+
+  return `\u2022 ${parts.join('  \u00b7  ')}`
+}
+
+function recapSince(since: Date | null, timeZone: string): string {
+  if (!since) return 'since the last recap'
+
+  const formatted = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(since)
+
+  return `since ${formatted}`
+}
+
+function packLines(lines: string[]): unknown[] {
+  const blocks: unknown[] = []
+  let current: string[] = []
+  let length = 0
+
+  for (const line of lines) {
+    if (current.length > 0 && length + line.length + 1 > RECAP_SECTION_MAX_CHARS) {
+      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: current.join('\n') } })
+      current = []
+      length = 0
+    }
+    current.push(line)
+    length += line.length + 1
+  }
+
+  if (current.length > 0) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: current.join('\n') } })
+  }
+
+  return blocks
+}
+
+export function formatRecap(input: RecapMessageInput): SlackMessage {
+  const total = input.issues.length
+  const ordered = [...input.issues].sort((a, b) => (b.eventCount ?? 0) - (a.eventCount ?? 0))
+  const shown = ordered.slice(0, RECAP_MAX_ISSUES)
+
+  const heading =
+    `\ud83d\uddd2\ufe0f *Daily recap \u2014 ${escape(input.projectLabel)}*\n` +
+    `${total} ${total === 1 ? 'issue' : 'issues'} matched this project's recap rules ` +
+    `${recapSince(input.since, input.timeZone)}.`
+
+  const lines = shown.map(recapLine)
+  if (total > shown.length) lines.push(`_+${total - shown.length} more_`)
+
+  return {
+    text: `\ud83d\uddd2\ufe0f Daily recap \u2014 ${input.projectLabel}: ${total} ${total === 1 ? 'issue' : 'issues'}`,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: heading } },
+      ...packLines(lines),
+    ],
+  }
+}
+
 export function markResolved(blocks: unknown[], userId: string): unknown[] {
   const kept = blocks.filter((block) => {
     return !(typeof block === 'object' && block !== null && 'type' in block &&

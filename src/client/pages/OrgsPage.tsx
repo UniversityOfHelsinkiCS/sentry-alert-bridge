@@ -31,6 +31,7 @@ export default function OrgsPage() {
   const [name, setName] = useState('')
   const [authToken, setAuthToken] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [timezone, setTimezone] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<OrgDto | null>(null)
   const [testing, setTesting] = useState<string | null>(null)
@@ -41,6 +42,7 @@ export default function OrgsPage() {
     setName('')
     setAuthToken('')
     setBaseUrl('')
+    setTimezone('')
     setEditing('new')
   }
 
@@ -50,6 +52,7 @@ export default function OrgsPage() {
     setName(org.name ?? '')
     setAuthToken('')
     setBaseUrl(org.baseUrl ?? '')
+    setTimezone(org.timezone ?? '')
     setEditing(org)
   }
 
@@ -59,6 +62,7 @@ export default function OrgsPage() {
     const input = {
       name: name.trim() === '' ? null : name.trim(),
       baseUrl: baseUrl.trim() === '' ? null : baseUrl.trim(),
+      timezone: timezone.trim() === '' ? null : timezone.trim(),
       ...(authToken.trim() === '' ? {} : { authToken: authToken.trim() }),
     }
 
@@ -220,6 +224,14 @@ export default function OrgsPage() {
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               helperText="Leave blank to use SENTRY_BASE_URL."
+              fullWidth
+            />
+            <TextField
+              label="Time zone (optional)"
+              placeholder="Europe/Helsinki"
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              helperText="An IANA zone. Recap times for this organisation's projects are read in it."
               fullWidth
             />
           </Stack>

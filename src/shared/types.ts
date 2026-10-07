@@ -1,13 +1,22 @@
 export const MAX_COOLDOWN_MINUTES = 52_560_000
 
+export const MAX_RECAP_PATTERNS = 1000
+
+export const MAX_RECAP_PATTERN_LENGTH = 2000
+
+export const MAX_RECAP_TIMES = 1440
+
+export const RECAP_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+
 export type DeliveryOutcome = 'sent' | 'unrouted' | 'failed'
 
-export type IngestSource = 'polling' | 'test' | 'resolve'
+export type IngestSource = 'polling' | 'test' | 'resolve' | 'recap'
 
 /** The issue shape the Sentry API client produces. */
 export interface OrgDto {
   slug: string
   name: string | null
+  timezone: string | null
   hasToken: boolean
   baseUrl: string | null
   projectCount: number
@@ -46,6 +55,7 @@ export type IssueVerdict =
   | 'no-new-events'
   | 'in-cooldown'
   | 'unknown'
+  | 'recap'
 
 export interface ProjectIssueDto {
   id: string
@@ -80,6 +90,10 @@ export interface ProjectDto {
     enabled: boolean
     cooldownMinutes: number | null
     updatedAt: string
+    recapPatterns: string[]
+    recapTimes: string[]
+    lastRecapAt: string | null
+    recapQueuedCount: number
   } | null
 }
 

@@ -33,21 +33,32 @@ vi.mock('../../../src/server/db/seenIssues.js', () => ({
   listClaimStates,
   pruneSeenIssues: vi.fn(async () => 0),
 }))
+const queueRecapIssue = vi.fn(async () => true)
+const listEnabledRoutes = vi.fn()
+
 const ROUTED_AT = new Date(Date.now() - 24 * 60 * 60_000)
-vi.mock('../../../src/server/db/routes.js', () => ({
-  listEnabledRoutes: vi.fn(async () => [
-    {
-      orgSlug: 'sentry',
-      projectSlug: 'backend',
-      destinationId: 1,
-      enabled: true,
-      alertsFrom: ROUTED_AT,
-      cooldownMinutes: null,
-    },
-  ]),
+vi.mock('../../../src/server/db/routes.js', () => ({ listEnabledRoutes }))
+
+vi.mock('../../../src/server/db/recapQueue.js', () => ({
+  queueRecapIssue,
+  pruneRecapQueue: vi.fn(async () => 0),
 }))
 
 const { pollOnce } = await import('../../../src/server/ingest/poller.js')
+
+function route(recapPatterns: string[] = []) {
+  return {
+    orgSlug: 'sentry',
+    projectSlug: 'backend',
+    destinationId: 1,
+    enabled: true,
+    alertsFrom: ROUTED_AT,
+    cooldownMinutes: null,
+    recapPatterns,
+    recapTimes: recapPatterns.length > 0 ? ['09:00'] : [],
+    lastRecapAt: null,
+  }
+}
 
 function issue(id: string, ageMinutes: number, firstSeenDaysAgo = 0): ApiIssue {
   return {
@@ -66,6 +77,9 @@ describe('pollOnce', () => {
     listClaimStates.mockResolvedValue(new Map())
     getLatestEvent.mockReset()
     getLatestEvent.mockResolvedValue(null)
+    queueRecapIssue.mockClear()
+    queueRecapIssue.mockResolvedValue(true)
+    listEnabledRoutes.mockResolvedValue([route()])
   })
 
   it('attaches the deepest in-app frame of the latest event', async () => {
@@ -212,5 +226,76 @@ describe('pollOnce', () => {
 
     expect(summary.failed).toBe(1)
     expect(handleIssue).not.toHaveBeenCalled()
+  })
+
+  it('queues a recap match instead of alerting on it', async () => {
+    listEnabledRoutes.mockResolvedValue([route(['^Timeout'])])
+    listNewIssues.mockResolvedValue([
+      { ...issue('1', 1), title: 'TimeoutError: upstream gone' } as ApiIssue,
+    ])
+
+    const summary = await pollOnce()
+
+    expect(handleIssue).not.toHaveBeenCalled()
+    expect(summary.recapped).toBe(1)
+    expect(queueRecapIssue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgSlug: 'sentry',
+        projectSlug: 'backend',
+        issueId: '1',
+        matchedPattern: '^Timeout',
+      }),
+    )
+  })
+
+  it('gives the queued issue a usable link even without a Sentry permalink', async () => {
+    listEnabledRoutes.mockResolvedValue([route(['^Timeout'])])
+    listNewIssues.mockResolvedValue([
+      { ...issue('1', 1), title: 'TimeoutError', permalink: null } as ApiIssue,
+    ])
+
+    await pollOnce()
+
+    const queued = queueRecapIssue.mock.calls[0]?.[0] as { issueUrl: string }
+    expect(queued.issueUrl).toMatch(/\/issues\/1\//)
+  })
+
+  it('matches a recap rule against the culprit too', async () => {
+    listEnabledRoutes.mockResolvedValue([route(['api/sync'])])
+    listNewIssues.mockResolvedValue([
+      { ...issue('1', 1), title: 'Unrelated', culprit: 'app/api/sync' } as ApiIssue,
+    ])
+
+    await pollOnce()
+
+    expect(handleIssue).not.toHaveBeenCalled()
+    expect(queueRecapIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ matchedPattern: 'api/sync' }),
+    )
+  })
+
+  it('still alerts immediately on an issue no recap rule matches', async () => {
+    listEnabledRoutes.mockResolvedValue([route(['^Timeout'])])
+    listNewIssues.mockResolvedValue([
+      { ...issue('1', 1), title: 'NullPointerException' } as ApiIssue,
+    ])
+
+    const summary = await pollOnce()
+
+    expect(queueRecapIssue).not.toHaveBeenCalled()
+    expect(handleIssue).toHaveBeenCalledTimes(1)
+    expect(summary.recapped).toBe(0)
+  })
+
+  it('counts a full recap queue as skipped rather than alerting', async () => {
+    listEnabledRoutes.mockResolvedValue([route(['^Timeout'])])
+    listNewIssues.mockResolvedValue([{ ...issue('1', 1), title: 'Timeout' } as ApiIssue])
+    queueRecapIssue.mockResolvedValue(false)
+
+    const summary = await pollOnce()
+
+    expect(handleIssue).not.toHaveBeenCalled()
+    expect(summary.recapped).toBe(0)
+    expect(summary.skipped).toBe(1)
   })
 })

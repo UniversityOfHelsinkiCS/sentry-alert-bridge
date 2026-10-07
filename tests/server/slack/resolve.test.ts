@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const resolveIssue = vi.hoisted(() => vi.fn())
 const markIssueResolved = vi.hoisted(() => vi.fn())
 const recordDelivery = vi.hoisted(() => vi.fn())
+const clearRecapQueue = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../src/server/sentry/api.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/server/sentry/api.js')>()
   return { ...actual, resolveIssue }
 })
 vi.mock('../../../src/server/db/seenIssues.js', () => ({ markIssueResolved }))
+vi.mock('../../../src/server/db/recapQueue.js', () => ({ clearRecapQueue }))
 vi.mock('../../../src/server/db/orgs.js', () => ({
   getOrg: vi.fn(async (slug: string) => ({ slug, authToken: 'tok', baseUrl: null })),
   listPollableOrgs: vi.fn(async () => [{ slug: 'sentry', authToken: 'tok', baseUrl: null }]),

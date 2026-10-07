@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedIssue } from '../../../src/shared/types.js'
-import { formatIssue, markResolved } from '../../../src/server/slack/format.js'
+import {
+  formatIssue,
+  formatRecap,
+  markResolved,
+  type RecapIssue,
+} from '../../../src/server/slack/format.js'
 
 interface Block {
   type?: string
@@ -128,5 +133,59 @@ describe('formatIssue stack frame', () => {
   it('escapes a frame that looks like markup', () => {
     const json = JSON.stringify(formatIssue({ ...issue, frame: '<anonymous>:1:1' }).blocks)
     expect(json).toContain('&lt;anonymous&gt;')
+  })
+})
+
+describe('formatRecap', () => {
+  const entry = (n: number, overrides: Partial<RecapIssue> = {}): RecapIssue => ({
+    issueTitle: `issue ${n}`,
+    issueUrl: `https://sentry/issues/${n}`,
+    level: 'error',
+    eventCount: n,
+    occurrences: 1,
+    ...overrides,
+  })
+
+  const recap = (issues: RecapIssue[]) =>
+    formatRecap({
+      projectLabel: 'backend',
+      issues,
+      since: new Date('2026-10-06T06:00:00Z'),
+      timeZone: 'Europe/Helsinki',
+    })
+
+  it('renders every issue as a link', () => {
+    const text = JSON.stringify(recap([entry(1), entry(2)]).blocks)
+
+    expect(text).toContain('<https://sentry/issues/1|issue 1>')
+    expect(text).toContain('<https://sentry/issues/2|issue 2>')
+  })
+
+  it('stays well under the Slack block limit for a large queue', () => {
+    const blocks = recap(Array.from({ length: 200 }, (_, i) => entry(i + 1))).blocks
+
+    expect(blocks.length).toBeLessThan(50)
+  })
+
+  it('caps the listed issues and says how many were left out', () => {
+    const text = JSON.stringify(recap(Array.from({ length: 60 }, (_, i) => entry(i + 1))).blocks)
+
+    expect(text).toContain('+10 more')
+  })
+
+  it('lists the noisiest issue first', () => {
+    const text = JSON.stringify(recap([entry(1), entry(99)]).blocks)
+
+    expect(text.indexOf('issue 99')).toBeLessThan(text.indexOf('issue 1'))
+  })
+
+  it('mentions repeat sightings only when there were several', () => {
+    expect(JSON.stringify(recap([entry(1, { occurrences: 4 })]).blocks)).toContain('seen 4')
+    expect(JSON.stringify(recap([entry(1, { occurrences: 1 })]).blocks)).not.toContain('seen 1')
+  })
+
+  it('has a fallback text for notifications', () => {
+    expect(recap([entry(1)]).text).toContain('backend')
+    expect(recap([entry(1)]).text).toContain('1 issue')
   })
 })

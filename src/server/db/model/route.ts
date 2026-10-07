@@ -15,6 +15,9 @@ export class Route extends Model<InferAttributes<Route>, InferCreationAttributes
   declare updatedAt: CreationOptional<Date>
   declare alertsFrom: CreationOptional<Date>
   declare cooldownMinutes: CreationOptional<number | null>
+  declare recapPatterns: CreationOptional<string[]>
+  declare recapTimes: CreationOptional<string[]>
+  declare lastRecapAt: CreationOptional<Date | null>
 }
 
 Route.init(
@@ -26,6 +29,9 @@ Route.init(
     updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     alertsFrom: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     cooldownMinutes: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+    recapPatterns: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    recapTimes: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    lastRecapAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
   },
   { ...common, tableName: 'routes' },
 )

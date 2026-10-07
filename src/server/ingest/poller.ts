@@ -2,9 +2,11 @@ import { pruneDeliveries, recordDelivery } from '../db/deliveries.js'
 import { listPollableOrgs } from '../db/orgs.js'
 import { upsertProject } from '../db/projects.js'
 import { listEnabledRoutes, type Route } from '../db/routes.js'
+import { pruneRecapQueue, queueRecapIssue } from '../db/recapQueue.js'
 import { listClaimStates, pruneSeenIssues } from '../db/seenIssues.js'
 import { getSettings, touchLastPoll } from '../db/settings.js'
 import { decideAlert } from './decide.js'
+import { compilePatterns, matchRecap } from './recap.js'
 import { logger } from '../logger.js'
 import { topFrame } from '../sentry/frame.js'
 import {
@@ -30,6 +32,7 @@ export interface PollSummary {
   sent: number
   unrouted: number
   skipped: number
+  recapped: number
   failed: number
 }
 
@@ -40,12 +43,13 @@ const DAY_MS = 86_400_000
 async function prune(retentionDays: number): Promise<void> {
   const before = new Date(Date.now() - retentionDays * DAY_MS)
   try {
-    const [deliveries, seenIssues] = await Promise.all([
+    const [deliveries, seenIssues, recapQueue] = await Promise.all([
       pruneDeliveries(before),
       pruneSeenIssues(before),
+      pruneRecapQueue(before),
     ])
-    if (deliveries > 0 || seenIssues > 0) {
-      logger.info({ deliveries, seenIssues, before }, 'pruned history')
+    if (deliveries > 0 || seenIssues > 0 || recapQueue > 0) {
+      logger.info({ deliveries, seenIssues, recapQueue, before }, 'pruned history')
     }
   } catch (err) {
     logger.warn({ err }, 'prune failed')
@@ -115,6 +119,7 @@ interface AlertContext {
 async function alertOnIssues(issues: ApiIssue[], ctx: AlertContext): Promise<void> {
   const { org, route, summary } = ctx
   const states = await listClaimStates(org.slug, route.projectSlug)
+  const recapPatterns = compilePatterns(route.recapPatterns)
 
   for (const issue of issues) {
     const decision = decideAlert({
@@ -130,6 +135,37 @@ async function alertOnIssues(issues: ApiIssue[], ctx: AlertContext): Promise<voi
         { orgSlug: org.slug, projectSlug: route.projectSlug, issueId: issue.id, decision },
         'issue not alertable',
       )
+      continue
+    }
+
+    const matched = matchRecap(
+      { title: issue.title, culprit: issue.culprit },
+      recapPatterns,
+    )
+
+    if (matched !== null) {
+      const queued = normalizeApiIssue(org, issue, route.projectSlug, ctx.projectName, null)
+      const accepted = await queueRecapIssue({
+        orgSlug: org.slug,
+        projectSlug: route.projectSlug,
+        issueId: queued.id,
+        issueTitle: queued.title,
+        issueUrl: queued.url ?? '',
+        culprit: queued.culprit ?? null,
+        level: queued.level ?? null,
+        shortId: queued.shortId ?? null,
+        eventCount: queued.count ?? null,
+        matchedPattern: matched,
+      })
+
+      if (accepted) summary.recapped++
+      else {
+        summary.skipped++
+        logger.warn(
+          { orgSlug: org.slug, projectSlug: route.projectSlug, issueId: queued.id },
+          'recap queue is full, dropping issue',
+        )
+      }
       continue
     }
 
@@ -190,6 +226,7 @@ export async function pollOnce(): Promise<PollSummary> {
     sent: 0,
     unrouted: 0,
     skipped: 0,
+    recapped: 0,
     failed: 0,
   }
 

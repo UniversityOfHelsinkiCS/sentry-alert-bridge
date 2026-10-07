@@ -54,6 +54,7 @@ export interface OrgInput {
   name: string | null
   authToken?: string
   baseUrl: string | null
+  timezone: string | null
 }
 
 export const api = {
@@ -88,6 +89,16 @@ export const api = {
       method: 'PUT',
       ...body({ destinationId, enabled, cooldownMinutes }),
     }),
+  setRouteRecap: (org: string, slug: string, patterns: string[], times: string[]) =>
+    request<ProjectDto[]>(scoped(`/routes/${encodeURIComponent(slug)}/recap`, org), {
+      method: 'PUT',
+      ...body({ patterns, times }),
+    }),
+  sendRecapNow: (org: string, slug: string) =>
+    request<{ ok: true; issues: number; sent: boolean }>(
+      scoped(`/routes/${encodeURIComponent(slug)}/recap/send`, org),
+      { method: 'POST' },
+    ),
   clearRoute: (org: string, slug: string) =>
     request<ProjectDto[]>(scoped(`/routes/${encodeURIComponent(slug)}`, org), {
       method: 'DELETE',

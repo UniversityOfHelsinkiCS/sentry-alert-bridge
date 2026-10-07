@@ -1,5 +1,6 @@
 import type { ProjectDto } from '../../shared/types.js'
 import { Route, SentryProject } from './model/index.js'
+import { countRecapQueueByProject } from './recapQueue.js'
 
 export async function upsertProject(
   orgSlug: string,
@@ -15,9 +16,10 @@ export async function upsertProject(
 }
 
 export async function listProjects(orgSlug: string): Promise<ProjectDto[]> {
-  const [projects, routes] = await Promise.all([
+  const [projects, routes, queued] = await Promise.all([
     SentryProject.findAll({ where: { orgSlug }, order: [['slug', 'ASC']] }),
     Route.findAll({ where: { orgSlug } }),
+    countRecapQueueByProject(orgSlug),
   ])
 
   const byProject = new Map(routes.map((route) => [route.projectSlug, route]))
@@ -36,6 +38,10 @@ export async function listProjects(orgSlug: string): Promise<ProjectDto[]> {
             enabled: route.enabled,
             cooldownMinutes: route.cooldownMinutes,
             updatedAt: (route.updatedAt ?? project.lastSeenAt).toISOString(),
+            recapPatterns: route.recapPatterns ?? [],
+            recapTimes: route.recapTimes ?? [],
+            lastRecapAt: route.lastRecapAt?.toISOString() ?? null,
+            recapQueuedCount: queued.get(project.slug) ?? 0,
           }
         : null,
     }

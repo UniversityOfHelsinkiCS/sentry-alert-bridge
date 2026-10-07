@@ -1,6 +1,7 @@
 import './associations.js'
 
 export { Delivery } from './delivery.js'
+export { RecapQueueItem } from './recapQueueItem.js'
 export { Route } from './route.js'
 export { SeenIssue } from './seenIssue.js'
 export { SentryOrg } from './sentryOrg.js'

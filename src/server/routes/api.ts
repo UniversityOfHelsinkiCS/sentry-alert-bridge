@@ -1,6 +1,12 @@
 import { Router, type Request, type Response } from 'express'
 import { z } from 'zod'
-import { MAX_COOLDOWN_MINUTES } from '../../shared/types.js'
+import {
+  MAX_COOLDOWN_MINUTES,
+  MAX_RECAP_PATTERN_LENGTH,
+  MAX_RECAP_PATTERNS,
+  MAX_RECAP_TIMES,
+  RECAP_TIME_PATTERN,
+} from '../../shared/types.js'
 import type { ProjectIssuesDto, SettingsDto } from '../../shared/types.js'
 import { requireAuth } from '../auth/middleware.js'
 import { countRoutesUsing, listDeliveries, recordDelivery } from '../db/deliveries.js'
@@ -23,11 +29,13 @@ import {
   updateOrg,
 } from '../db/orgs.js'
 import { listProjects, upsertProject } from '../db/projects.js'
-import { deleteRoute, getRoute, upsertRoute } from '../db/routes.js'
+import { deleteRoute, getRoute, updateRouteRecap, upsertRoute } from '../db/routes.js'
 import { listClaimStates } from '../db/seenIssues.js'
 import { getSettings, type Settings, updateSettings } from '../db/settings.js'
 import { decideAlert } from '../ingest/decide.js'
 import { pollNow, restartPoller } from '../ingest/poller.js'
+import { compilePatterns, matchRecap } from '../ingest/recap.js'
+import { runRecapNow } from '../ingest/recapScheduler.js'
 import {
   listNewIssues,
   listOrgProjects,
@@ -73,11 +81,45 @@ async function resolveOrg(slug: unknown, res: Response): Promise<SentryOrg | nul
 const requireOrg = (req: Request, res: Response): Promise<SentryOrg | null> =>
   resolveOrg(req.query.org, res)
 
+const timezoneSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: value })
+      return true
+    } catch {
+      return false
+    }
+  }, 'not a known IANA time zone')
+
 const orgSchema = z.object({
   slug: slugSchema,
   name: z.string().max(200).nullable().default(null),
   authToken: z.string().min(1).optional(),
   baseUrl: z.string().url().nullable().default(null),
+  timezone: timezoneSchema.nullable().default(null),
+})
+
+const recapSchema = z.object({
+  patterns: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(MAX_RECAP_PATTERN_LENGTH)
+        .refine((value) => {
+          try {
+            new RegExp(value)
+            return true
+          } catch {
+            return false
+          }
+        }, 'not a valid regular expression'),
+    )
+    .max(MAX_RECAP_PATTERNS),
+  times: z.array(z.string().regex(RECAP_TIME_PATTERN, 'times must look like 09:00')).max(MAX_RECAP_TIMES),
 })
 
 apiRouter.get('/orgs', async (_req, res) => {
@@ -183,6 +225,7 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
 
   const cooldownMinutes = route.cooldownMinutes ?? settings.alertCooldownMinutes
   const cooldownMs = cooldownMinutes * 60_000
+  const recapPatterns = compilePatterns(route.recapPatterns)
 
   const body: ProjectIssuesDto = {
     orgSlug: org.slug,
@@ -192,6 +235,15 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
     issues: issues.map((issue) => {
       const normalized = normalizeApiIssue(org, issue, projectSlug, null)
       const state = states.get(issue.id)
+      const decision = decideAlert({
+        lastSeen: issue.lastSeen,
+        alertsFrom: route.alertsFrom,
+        state,
+        cooldownMs,
+      })
+      const recapped =
+        decision === 'alert' &&
+        matchRecap({ title: normalized.title, culprit: normalized.culprit }, recapPatterns) !== null
 
       return {
         id: issue.id,
@@ -202,12 +254,7 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
         firstSeen: issue.firstSeen ?? null,
         lastSeen: issue.lastSeen ?? null,
         alertedAt: state?.alertedAt?.toISOString() ?? null,
-        verdict: decideAlert({
-          lastSeen: issue.lastSeen,
-          alertsFrom: route.alertsFrom,
-          state,
-          cooldownMs,
-        }),
+        verdict: recapped ? ('recap' as const) : decision,
       }
     }),
   }
@@ -262,6 +309,51 @@ apiRouter.put('/routes/:slug', async (req, res) => {
     body.data.cooldownMinutes,
   )
   res.json(await listProjects(org.slug))
+})
+
+apiRouter.put('/routes/:slug/recap', async (req, res) => {
+  const org = await requireOrg(req, res)
+  if (!org) return
+
+  const slug = slugSchema.safeParse(req.params.slug)
+  const body = recapSchema.safeParse(req.body)
+
+  if (!slug.success) {
+    res.status(400).json({ error: 'invalid project slug' })
+    return
+  }
+  if (!body.success) {
+    res.status(400).json({ error: body.error.issues[0]?.message ?? 'invalid recap settings' })
+    return
+  }
+
+  const times = [...new Set(body.data.times)].sort()
+  const patterns = [...new Set(body.data.patterns)]
+
+  if (!(await updateRouteRecap(org.slug, slug.data, patterns, times))) {
+    res.status(404).json({ error: 'set a destination for this project first' })
+    return
+  }
+
+  res.json(await listProjects(org.slug))
+})
+
+apiRouter.post('/routes/:slug/recap/send', async (req, res) => {
+  const org = await requireOrg(req, res)
+  if (!org) return
+
+  const slug = slugSchema.safeParse(req.params.slug)
+  if (!slug.success) {
+    res.status(400).json({ error: 'invalid project slug' })
+    return
+  }
+
+  try {
+    const result = await runRecapNow(org.slug, slug.data)
+    res.json({ ok: true, issues: result.issues, sent: result.sent })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'could not send the recap' })
+  }
 })
 
 apiRouter.delete('/routes/:slug', async (req, res) => {

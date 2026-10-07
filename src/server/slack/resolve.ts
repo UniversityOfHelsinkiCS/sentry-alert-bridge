@@ -1,5 +1,6 @@
 import { recordDelivery } from '../db/deliveries.js'
 import { getOrg, listPollableOrgs } from '../db/orgs.js'
+import { clearRecapQueue } from '../db/recapQueue.js'
 import { markIssueResolved } from '../db/seenIssues.js'
 import { logger } from '../logger.js'
 import { SentryApiError, resolveIssue, type SentryOrg } from '../sentry/api.js'
@@ -61,6 +62,7 @@ export async function handleResolveClick(click: ResolveClick): Promise<void> {
   }
 
   await markIssueResolved(org.slug, projectSlug, issueId)
+  await clearRecapQueue(org.slug, projectSlug, [issueId])
 
   await postToResponseUrl(responseUrl, {
     text: 'Issue resolved in Sentry',

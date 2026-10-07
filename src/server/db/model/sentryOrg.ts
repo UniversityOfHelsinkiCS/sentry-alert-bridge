@@ -15,6 +15,7 @@ export class SentryOrg extends Model<
   declare name: string | null
   declare authToken: string
   declare baseUrl: string | null
+  declare timezone: CreationOptional<string | null>
   declare createdAt: CreationOptional<Date>
 }
 
@@ -24,6 +25,7 @@ SentryOrg.init(
     name: { type: DataTypes.TEXT, allowNull: true },
     authToken: { type: DataTypes.TEXT, allowNull: false },
     baseUrl: { type: DataTypes.TEXT, allowNull: true },
+    timezone: { type: DataTypes.TEXT, allowNull: true, defaultValue: null },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   },
   { ...common, tableName: 'sentry_orgs' },

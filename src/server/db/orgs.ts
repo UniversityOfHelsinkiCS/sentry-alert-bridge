@@ -8,12 +8,14 @@ export interface OrgInput {
   name: string | null
   authToken?: string
   baseUrl: string | null
+  timezone: string | null
 }
 
 async function toDto(org: SentryOrg): Promise<OrgDto> {
   return {
     slug: org.slug,
     name: org.name,
+    timezone: org.timezone,
     hasToken: org.authToken.length > 0,
     baseUrl: org.baseUrl,
     projectCount: await countProjects(org.slug),
@@ -41,6 +43,11 @@ export async function getOrg(slug: string): Promise<SentryOrgType | null> {
   return org ? toSentryOrg(org) : null
 }
 
+export async function listOrgTimezones(): Promise<Map<string, string | null>> {
+  const orgs = await SentryOrg.findAll({ attributes: ['slug', 'timezone'] })
+  return new Map(orgs.map((org) => [org.slug, org.timezone]))
+}
+
 export async function orgExists(slug: string): Promise<boolean> {
   return (await SentryOrg.count({ where: { slug } })) > 0
 }
@@ -51,6 +58,7 @@ export async function createOrg(input: OrgInput): Promise<OrgDto> {
     name: input.name,
     authToken: input.authToken ?? '',
     baseUrl: input.baseUrl,
+    timezone: input.timezone,
   })
   return toDto(org)
 }
@@ -61,6 +69,7 @@ export async function updateOrg(slug: string, input: OrgInput): Promise<OrgDto |
   await org.update({
     name: input.name,
     baseUrl: input.baseUrl,
+    timezone: input.timezone,
     ...(input.authToken ? { authToken: input.authToken } : {}),
   })
   return toDto(org)
