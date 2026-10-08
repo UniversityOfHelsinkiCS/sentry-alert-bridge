@@ -96,7 +96,7 @@ describe('recapOnce', () => {
     sendToSlack.mockRejectedValue(new Error('channel is gone'))
 
     expect(await recapOnce(JUST_AFTER)).toBe(0)
-    expect(clearRecapQueue).not.toHaveBeenCalled()
+    expect(clearRecapQueue).toHaveBeenCalledWith('sentry', 'backend', [])
     expect(recordAlert).not.toHaveBeenCalled()
     expect(stampRecapRun).toHaveBeenCalledTimes(1)
     expect(recordDelivery).toHaveBeenCalledWith(

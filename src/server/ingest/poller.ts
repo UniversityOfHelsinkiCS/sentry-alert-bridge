@@ -6,7 +6,7 @@ import { pruneRecapQueue, queueRecapIssue } from '../db/recapQueue.js'
 import { listClaimStates, pruneSeenIssues } from '../db/seenIssues.js'
 import { getSettings, touchLastPoll } from '../db/settings.js'
 import { decideAlert } from './decide.js'
-import { compilePatterns, matchRecap } from './recap.js'
+import { compilePatterns, matchRecap } from '../../shared/recap.js'
 import { logger } from '../logger.js'
 import { topFrame } from '../sentry/frame.js'
 import {
@@ -145,18 +145,21 @@ async function alertOnIssues(issues: ApiIssue[], ctx: AlertContext): Promise<voi
 
     if (matched !== null) {
       const queued = normalizeApiIssue(org, issue, route.projectSlug, ctx.projectName, null)
-      const accepted = await queueRecapIssue({
-        orgSlug: org.slug,
-        projectSlug: route.projectSlug,
-        issueId: queued.id,
-        issueTitle: queued.title,
-        issueUrl: queued.url ?? '',
-        culprit: queued.culprit ?? null,
-        level: queued.level ?? null,
-        shortId: queued.shortId ?? null,
-        eventCount: queued.count ?? null,
-        matchedPattern: matched,
-      })
+      const accepted = await queueRecapIssue(
+        {
+          orgSlug: org.slug,
+          projectSlug: route.projectSlug,
+          issueId: queued.id,
+          issueTitle: queued.title,
+          issueUrl: queued.url ?? '',
+          culprit: queued.culprit ?? null,
+          level: queued.level ?? null,
+          shortId: queued.shortId ?? null,
+          eventCount: queued.count ?? null,
+          matchedPattern: matched,
+        },
+        () => frameFor(org, queued.id),
+      )
 
       if (accepted) summary.recapped++
       else {

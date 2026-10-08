@@ -2,12 +2,12 @@ import { config } from '../config.js'
 import { recordDelivery } from '../db/deliveries.js'
 import { getWebhookUrl } from '../db/destinations.js'
 import { listOrgTimezones } from '../db/orgs.js'
-import { clearRecapQueue, listRecapQueue } from '../db/recapQueue.js'
+import { clearRecapQueue, listRecapQueue, type RecapQueueEntry } from '../db/recapQueue.js'
 import { getRoute, listRecapRoutes, stampRecapRun, type Route } from '../db/routes.js'
 import { recordAlert } from '../db/seenIssues.js'
 import { logger } from '../logger.js'
 import { sendToSlack } from '../slack/client.js'
-import { formatRecap } from '../slack/format.js'
+import { chunkRecapIssues, formatRecap, type RecapIssue } from '../slack/format.js'
 import { recapDueAt } from './recap.js'
 
 const TICK_MS = 60_000
@@ -23,6 +23,17 @@ export interface RecapResult {
 function timeZoneFor(timezones: Map<string, string | null>, orgSlug: string): string {
   return timezones.get(orgSlug) ?? config.TZ
 }
+
+const toRecapIssue = (entry: RecapQueueEntry): RecapIssue => ({
+  issueTitle: entry.issueTitle,
+  issueUrl: entry.issueUrl,
+  culprit: entry.culprit,
+  level: entry.level,
+  shortId: entry.shortId,
+  frame: entry.frame,
+  eventCount: entry.eventCount,
+  occurrences: entry.occurrences,
+})
 
 async function runRecap(route: Route, timeZone: string, at: Date): Promise<RecapResult> {
   const queued = await listRecapQueue(route.orgSlug, route.projectSlug)
@@ -47,48 +58,55 @@ async function runRecap(route: Route, timeZone: string, at: Date): Promise<Recap
     return { issues: queued.length, sent: false }
   }
 
-  const message = formatRecap({
-    projectLabel: route.projectSlug,
-    issues: queued.map((entry) => ({
-      issueTitle: entry.issueTitle,
-      issueUrl: entry.issueUrl,
-      level: entry.level,
-      eventCount: entry.eventCount,
-      occurrences: entry.occurrences,
-    })),
-    since: route.lastRecapAt,
-    timeZone,
-  })
+  const ordered = [...queued].sort((a, b) => (b.eventCount ?? 0) - (a.eventCount ?? 0))
+  const chunks = chunkRecapIssues(ordered)
+  const sentIds: string[] = []
+  let failure: string | null = null
 
-  try {
-    await sendToSlack(webhookUrl, message)
-  } catch (err) {
-    await stampRecapRun(route.orgSlug, route.projectSlug, at)
-    logger.error(
-      { err, orgSlug: route.orgSlug, projectSlug: route.projectSlug },
-      'recap delivery failed',
-    )
+  for (const [index, chunk] of chunks.entries()) {
+    const message = formatRecap({
+      projectLabel: route.projectSlug,
+      issues: chunk.map(toRecapIssue),
+      since: route.lastRecapAt,
+      timeZone,
+      part: index + 1,
+      parts: chunks.length,
+    })
+
+    try {
+      await sendToSlack(webhookUrl, message)
+      sentIds.push(...chunk.map((entry) => entry.issueId))
+    } catch (err) {
+      failure = err instanceof Error ? err.message : 'slack delivery failed'
+      logger.error(
+        { err, orgSlug: route.orgSlug, projectSlug: route.projectSlug },
+        'recap delivery failed',
+      )
+      break
+    }
+  }
+
+  for (const issueId of sentIds) {
+    await recordAlert(route.orgSlug, route.projectSlug, issueId)
+  }
+
+  await clearRecapQueue(route.orgSlug, route.projectSlug, sentIds)
+  await stampRecapRun(route.orgSlug, route.projectSlug, at)
+
+  if (failure !== null) {
     await recordDelivery({
       source: 'recap',
       orgSlug: route.orgSlug,
       projectSlug: route.projectSlug,
       destinationId: route.destinationId,
       outcome: 'failed',
-      detail: err instanceof Error ? err.message : 'slack delivery failed',
+      detail:
+        sentIds.length === 0
+          ? failure
+          : `${failure} after ${sentIds.length} of ${queued.length} issues were sent`,
     })
-    return { issues: queued.length, sent: false }
+    return { issues: queued.length, sent: sentIds.length > 0 }
   }
-
-  for (const entry of queued) {
-    await recordAlert(route.orgSlug, route.projectSlug, entry.issueId)
-  }
-
-  await clearRecapQueue(
-    route.orgSlug,
-    route.projectSlug,
-    queued.map((entry) => entry.issueId),
-  )
-  await stampRecapRun(route.orgSlug, route.projectSlug, at)
 
   await recordDelivery({
     source: 'recap',
@@ -96,7 +114,9 @@ async function runRecap(route: Route, timeZone: string, at: Date): Promise<Recap
     projectSlug: route.projectSlug,
     destinationId: route.destinationId,
     outcome: 'sent',
-    detail: `${queued.length} ${queued.length === 1 ? 'issue' : 'issues'} in one recap`,
+    detail: `${queued.length} ${queued.length === 1 ? 'issue' : 'issues'} in ${
+      chunks.length === 1 ? 'one recap' : `${chunks.length} recap messages`
+    }`,
   })
 
   logger.info(

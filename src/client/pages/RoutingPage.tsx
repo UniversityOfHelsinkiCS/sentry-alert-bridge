@@ -22,11 +22,18 @@ import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { Fragment, useEffect, useState, type FormEvent } from 'react'
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { MAX_COOLDOWN_MINUTES } from '../../shared/types'
-import type { IssueVerdict, ProjectDto, ProjectIssuesDto } from '../../shared/types'
-import { api, useApi } from '../api'
+import { compilePatterns, matchRecap } from '../../shared/recap'
+import type {
+  DestinationDto,
+  IssueVerdict,
+  ProjectDto,
+  ProjectIssueDto,
+  ProjectIssuesDto,
+} from '../../shared/types'
+import { api, useApi, type UseApi } from '../api'
 import { useOrg, useOrgState } from '../OrgContext'
 import { errorMessage, useToast } from '../useToast'
 
@@ -201,36 +208,79 @@ function isValidRegex(pattern: string): boolean {
   }
 }
 
-function RecapDialog({
-  org,
-  project,
-  timezone,
-  onClose,
-  onSaved,
+function EditableList({
+  title,
+  values,
+  emptyText,
+  addLabel,
+  blank,
+  helper,
+  onChange,
+  renderField,
 }: {
-  org: string
-  project: ProjectDto
-  timezone: string | null
-  onClose: () => void
-  onSaved: (projects: ProjectDto[]) => void
+  title: string
+  values: string[]
+  emptyText: string
+  addLabel: string
+  blank: string
+  helper: ReactNode
+  onChange: (values: string[]) => void
+  renderField: (value: string, onValue: (next: string) => void) => ReactNode
 }) {
-  const route = project.route
-  const [patterns, setPatterns] = useState<string[]>(route?.recapPatterns ?? [])
-  const [times, setTimes] = useState<string[]>(route?.recapTimes ?? [])
+  const replace = (index: number, next: string) =>
+    onChange(values.map((value, i) => (i === index ? next : value)))
+
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2">{title}</Typography>
+
+      {values.length === 0 && (
+        <Typography variant="caption" color="text.secondary">
+          {emptyText}
+        </Typography>
+      )}
+
+      {values.map((value, index) => (
+        <Stack key={index} direction="row" spacing={1} alignItems="center">
+          {renderField(value, (next) => replace(index, next))}
+          <Button
+            size="small"
+            color="inherit"
+            onClick={() => onChange(values.filter((_, i) => i !== index))}
+          >
+            Remove
+          </Button>
+        </Stack>
+      ))}
+
+      <Box>
+        <Button size="small" onClick={() => onChange([...values, blank])}>
+          {addLabel}
+        </Button>
+      </Box>
+
+      <Typography variant="caption" color="text.secondary">
+        {helper}
+      </Typography>
+    </Stack>
+  )
+}
+
+function useRecapForm(org: string, project: ProjectDto, onSaved: (p: ProjectDto[]) => void) {
+  const [patterns, setPatterns] = useState<string[]>(project.route?.recapPatterns ?? [])
+  const [times, setTimes] = useState<string[]>(project.route?.recapTimes ?? [])
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
 
-  const cleanPatterns = patterns.map((p) => p.trim()).filter((p) => p !== '')
-  const cleanTimes = times.map((t) => t.trim()).filter((t) => t !== '')
-  const valid = cleanPatterns.every(isValidRegex)
+  const clean = (values: string[]) => values.map((v) => v.trim()).filter((v) => v !== '')
 
-  const save = async () => {
+  const save = async (onDone: () => void) => {
     setFormError(null)
     setSaving(true)
     try {
-      onSaved(await api.setRouteRecap(org, project.slug, cleanPatterns, cleanTimes))
-      onClose()
+      onSaved(await api.setRouteRecap(org, project.slug, clean(patterns), clean(times)))
+      onDone()
     } catch (err) {
       setFormError(errorMessage(err))
     } finally {
@@ -255,6 +305,151 @@ function RecapDialog({
     }
   }
 
+  return {
+    patterns,
+    setPatterns,
+    times,
+    setTimes,
+    formError,
+    saving,
+    sending,
+    save,
+    sendNow,
+    valid: clean(patterns).every(isValidRegex),
+  }
+}
+
+function PatternsField({
+  values,
+  onChange,
+}: {
+  values: string[]
+  onChange: (values: string[]) => void
+}) {
+  return (
+    <EditableList
+      title="Patterns"
+      values={values}
+      onChange={onChange}
+      emptyText="No patterns yet — every issue alerts immediately."
+      addLabel="Add pattern"
+      blank=""
+      helper={
+        <>
+          Case-insensitive and unanchored, so <code>Timeout</code> matches anywhere in the title
+          or culprit.
+        </>
+      }
+      renderField={(value, onValue) => (
+        <TextField
+          size="small"
+          fullWidth
+          value={value}
+          placeholder="^Timeout"
+          error={value.trim() !== '' && !isValidRegex(value.trim())}
+          onChange={(e) => onValue(e.target.value)}
+        />
+      )}
+    />
+  )
+}
+
+function TimesField({
+  values,
+  onChange,
+  timezone,
+}: {
+  values: string[]
+  onChange: (values: string[]) => void
+  timezone: string | null
+}) {
+  return (
+    <EditableList
+      title="Times"
+      values={values}
+      onChange={onChange}
+      emptyText="No times yet — matched issues stay queued until you add one."
+      addLabel="Add time"
+      blank="09:00"
+      helper={`Read in ${timezone ?? 'the server time zone'}, set on the Organisations page.`}
+      renderField={(value, onValue) => (
+        <TextField
+          size="small"
+          type="time"
+          value={value}
+          onChange={(e) => onValue(e.target.value)}
+          sx={{ maxWidth: 160 }}
+        />
+      )}
+    />
+  )
+}
+
+function PreviewRow({ issue, pattern }: { issue: ProjectIssueDto; pattern: string }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="baseline">
+      <Typography variant="body2" sx={{ flexGrow: 1, wordBreak: 'break-word' }}>
+        {issue.title}
+      </Typography>
+      <Chip size="small" variant="outlined" label={pattern} />
+    </Stack>
+  )
+}
+
+function RecapPreview({
+  patterns,
+  issues,
+}: {
+  patterns: string[]
+  issues: UseApi<ProjectIssuesDto>
+}) {
+  if (issues.loading) return <Skeleton variant="rectangular" height={80} />
+  if (issues.error) return <Alert severity="warning">{issues.error}</Alert>
+
+  const all = issues.data?.issues ?? []
+  const compiled = compilePatterns(patterns.map((p) => p.trim()).filter((p) => p !== ''))
+  const matched = all
+    .map((issue) => ({ issue, pattern: matchRecap(issue, compiled) }))
+    .filter((row): row is { issue: ProjectIssueDto; pattern: string } => row.pattern !== null)
+
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2">Preview</Typography>
+
+      <Typography variant="body2" color="text.secondary">
+        {matched.length} of {all.length} current {all.length === 1 ? 'issue' : 'issues'} match.
+      </Typography>
+
+      <Stack spacing={1} sx={{ maxHeight: 220, overflowY: 'auto' }}>
+        {matched.map((row) => (
+          <PreviewRow key={row.issue.id} issue={row.issue} pattern={row.pattern} />
+        ))}
+      </Stack>
+
+      <Typography variant="caption" color="text.secondary">
+        These are the project's current open issues in Sentry, not what is queued for the next
+        recap.
+      </Typography>
+    </Stack>
+  )
+}
+
+function RecapDialog({
+  org,
+  project,
+  timezone,
+  onClose,
+  onSaved,
+}: {
+  org: string
+  project: ProjectDto
+  timezone: string | null
+  onClose: () => void
+  onSaved: (projects: ProjectDto[]) => void
+}) {
+  const form = useRecapForm(org, project, onSaved)
+  const issues = useApi(() => api.projectIssues(org, project.slug), [org, project.slug])
+
   return (
     <Dialog open fullWidth maxWidth="sm" onClose={onClose}>
       <DialogTitle>Recap for {project.name ?? project.slug}</DialogTitle>
@@ -265,102 +460,38 @@ function RecapDialog({
             immediately. They are collected and delivered as one message at each time below.
           </Typography>
 
-          {formError && <Alert severity="info">{formError}</Alert>}
+          {form.formError && <Alert severity="info">{form.formError}</Alert>}
 
-          <Stack spacing={1}>
-            <Typography variant="subtitle2">Patterns</Typography>
-            {patterns.length === 0 && (
-              <Typography variant="caption" color="text.secondary">
-                No patterns yet — every issue alerts immediately.
-              </Typography>
-            )}
-            {patterns.map((pattern, index) => (
-              <Stack key={index} direction="row" spacing={1} alignItems="center">
-                <TextField
-                  size="small"
-                  fullWidth
-                  value={pattern}
-                  placeholder="^Timeout"
-                  error={pattern.trim() !== '' && !isValidRegex(pattern.trim())}
-                  onChange={(e) =>
-                    setPatterns(patterns.map((p, i) => (i === index ? e.target.value : p)))
-                  }
-                />
-                <Button
-                  size="small"
-                  color="inherit"
-                  onClick={() => setPatterns(patterns.filter((_, i) => i !== index))}
-                >
-                  Remove
-                </Button>
-              </Stack>
-            ))}
-            <Box>
-              <Button size="small" onClick={() => setPatterns([...patterns, ''])}>
-                Add pattern
-              </Button>
-            </Box>
-            <Typography variant="caption" color="text.secondary">
-              Case-insensitive and unanchored, so <code>Timeout</code> matches anywhere in the
-              title or culprit.
-            </Typography>
-          </Stack>
+          <PatternsField values={form.patterns} onChange={form.setPatterns} />
 
-          <Stack spacing={1}>
-            <Typography variant="subtitle2">Times</Typography>
-            {times.length === 0 && (
-              <Typography variant="caption" color="text.secondary">
-                No times yet — matched issues stay queued until you add one.
-              </Typography>
-            )}
-            {times.map((time, index) => (
-              <Stack key={index} direction="row" spacing={1} alignItems="center">
-                <TextField
-                  size="small"
-                  type="time"
-                  value={time}
-                  onChange={(e) =>
-                    setTimes(times.map((t, i) => (i === index ? e.target.value : t)))
-                  }
-                  sx={{ maxWidth: 160 }}
-                />
-                <Button
-                  size="small"
-                  color="inherit"
-                  onClick={() => setTimes(times.filter((_, i) => i !== index))}
-                >
-                  Remove
-                </Button>
-              </Stack>
-            ))}
-            <Box>
-              <Button size="small" onClick={() => setTimes([...times, '09:00'])}>
-                Add time
-              </Button>
-            </Box>
-            <Typography variant="caption" color="text.secondary">
-              Read in {timezone ?? 'the server time zone'}, set on the Organisations page.
-            </Typography>
-          </Stack>
+          <RecapPreview patterns={form.patterns} issues={issues} />
 
-          {route && route.recapQueuedCount > 0 && (
-            <Typography variant="body2" color="text.secondary">
-              {route.recapQueuedCount} issues are queued right now.
-            </Typography>
-          )}
+          <TimesField values={form.times} onChange={form.setTimes} timezone={timezone} />
+
+          <RecapQueueNote count={project.route?.recapQueuedCount ?? 0} />
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={sendNow} disabled={sending || !route}>
-          {sending ? 'Sending…' : 'Send recap now'}
+        <Button onClick={form.sendNow} disabled={form.sending || !project.route}>
+          {form.sending ? 'Sending…' : 'Send recap now'}
         </Button>
         <Box sx={{ flexGrow: 1 }} />
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={save} disabled={saving || !valid}>
-          {saving ? 'Saving…' : 'Save'}
+        <Button variant="contained" onClick={() => form.save(onClose)} disabled={form.saving || !form.valid}>
+          {form.saving ? 'Saving…' : 'Save'}
         </Button>
       </DialogActions>
     </Dialog>
+  )
+}
+
+function RecapQueueNote({ count }: { count: number }) {
+  if (count === 0) return null
+
+  return (
+    <Typography variant="body2" color="text.secondary">
+      {count} {count === 1 ? 'issue is' : 'issues are'} queued right now.
+    </Typography>
   )
 }
 
@@ -409,6 +540,150 @@ function CooldownField({
       inputProps={{ min: 0, max: MAX_COOLDOWN_MINUTES }}
       title="Minutes an issue stays quiet after alerting. Blank uses the global default."
     />
+  )
+}
+
+interface ProjectRowProps {
+  org: string
+  project: ProjectDto
+  dests: DestinationDto[]
+  defaultCooldown: number | null
+  highlighted: boolean
+  expanded: boolean
+  onToggleDebug: () => void
+  onOpenRecap: () => void
+  onSave: (
+    project: ProjectDto,
+    destinationId: number | null,
+    enabled: boolean,
+    cooldownMinutes?: number | null,
+  ) => void
+}
+
+function DebugToggle({ shown, expanded, onToggle }: { shown: boolean; expanded: boolean; onToggle: () => void }) {
+  if (!shown) return null
+
+  return (
+    <Button
+      size="small"
+      variant="outlined"
+      startIcon={
+        expanded ? (
+          <KeyboardArrowDownIcon fontSize="small" />
+        ) : (
+          <KeyboardArrowRightIcon fontSize="small" />
+        )
+      }
+      onClick={onToggle}
+    >
+      Debug
+    </Button>
+  )
+}
+
+function ProjectName({ project }: { project: ProjectDto }) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Typography variant="body2">{project.name ?? project.slug}</Typography>
+      {project.name && project.name !== project.slug && (
+        <Typography variant="caption" color="text.secondary">
+          {project.slug}
+        </Typography>
+      )}
+      {!project.route && <Chip size="small" label="needs routing" />}
+    </Stack>
+  )
+}
+
+function DestinationSelect({
+  project,
+  dests,
+  onSave,
+}: Pick<ProjectRowProps, 'project' | 'dests' | 'onSave'>) {
+  return (
+    <Select
+      size="small"
+      fullWidth
+      displayEmpty
+      value={project.route ? String(project.route.destinationId) : UNROUTED}
+      onChange={(e) =>
+        onSave(
+          project,
+          e.target.value === UNROUTED ? null : Number(e.target.value),
+          project.route?.enabled ?? true,
+        )
+      }
+    >
+      <MenuItem value={UNROUTED}>
+        <em>Not routed</em>
+      </MenuItem>
+      {dests.map((d) => (
+        <MenuItem key={d.id} value={String(d.id)}>
+          {d.label}
+        </MenuItem>
+      ))}
+    </Select>
+  )
+}
+
+function ProjectRow(props: ProjectRowProps) {
+  const { org, project, dests, defaultCooldown, expanded, onSave } = props
+  const route = project.route
+
+  return (
+    <Fragment>
+      <TableRow selected={props.highlighted} hover>
+        <TableCell>
+          <DebugToggle shown={route !== null} expanded={expanded} onToggle={props.onToggleDebug} />
+        </TableCell>
+
+        <TableCell>
+          <ProjectName project={project} />
+        </TableCell>
+
+        <TableCell>
+          <DestinationSelect project={project} dests={dests} onSave={onSave} />
+        </TableCell>
+
+        <TableCell>
+          <CooldownField
+            disabled={!route}
+            value={route?.cooldownMinutes ?? null}
+            placeholder={defaultCooldown}
+            onCommit={(minutes) =>
+              route && onSave(project, route.destinationId, route.enabled, minutes)
+            }
+          />
+        </TableCell>
+
+        <TableCell>
+          <RecapCell route={route} onOpen={props.onOpenRecap} />
+        </TableCell>
+
+        <TableCell align="center">
+          <Switch
+            size="small"
+            disabled={!route}
+            checked={route?.enabled ?? false}
+            onChange={(e) => route && onSave(project, route.destinationId, e.target.checked)}
+          />
+        </TableCell>
+
+        <TableCell align="right">
+          <Typography variant="caption" color="text.secondary">
+            {new Date(project.lastSeenAt).toLocaleString()}
+          </Typography>
+        </TableCell>
+      </TableRow>
+
+      <TableRow>
+        <TableCell colSpan={7} sx={{ py: 0, border: 0 }}>
+          <Collapse in={expanded} unmountOnExit>
+            <IssueDebugPanel org={org} slug={project.slug} />
+          </Collapse>
+        </TableCell>
+      </TableRow>
+    </Fragment>
   )
 }
 
@@ -522,114 +797,20 @@ export default function RoutingPage() {
             )}
 
             {rows.map((project) => (
-              <Fragment key={project.slug}>
-              <TableRow
-                selected={project.slug === highlight}
-                hover
-              >
-                <TableCell>
-                  {project.route && (
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={
-                        expanded === project.slug ? (
-                          <KeyboardArrowDownIcon fontSize="small" />
-                        ) : (
-                          <KeyboardArrowRightIcon fontSize="small" />
-                        )
-                      }
-                      onClick={() =>
-                        setExpanded(expanded === project.slug ? null : project.slug)
-                      }
-                    >
-                      Debug
-                    </Button>
-                  )}
-                </TableCell>
-
-                <TableCell>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Typography variant="body2">{project.name ?? project.slug}</Typography>
-                    {project.name && project.name !== project.slug && (
-                      <Typography variant="caption" color="text.secondary">
-                        {project.slug}
-                      </Typography>
-                    )}
-                    {!project.route && <Chip size="small" label="needs routing" />}
-                  </Stack>
-                </TableCell>
-
-                <TableCell>
-                  <Select
-                    size="small"
-                    fullWidth
-                    displayEmpty
-                    value={project.route ? String(project.route.destinationId) : UNROUTED}
-                    onChange={(e) =>
-                      save(
-                        project,
-                        e.target.value === UNROUTED ? null : Number(e.target.value),
-                        project.route?.enabled ?? true,
-                      )
-                    }
-                  >
-                    <MenuItem value={UNROUTED}>
-                      <em>Not routed</em>
-                    </MenuItem>
-                    {dests.map((d) => (
-                      <MenuItem key={d.id} value={String(d.id)}>
-                        {d.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </TableCell>
-
-                <TableCell>
-                  <CooldownField
-                    disabled={!project.route}
-                    value={project.route?.cooldownMinutes ?? null}
-                    placeholder={defaultCooldown}
-                    onCommit={(minutes) =>
-                      project.route &&
-                      save(project, project.route.destinationId, project.route.enabled, minutes)
-                    }
-                  />
-                </TableCell>
-
-                <TableCell>
-                  <RecapCell
-                    route={project.route}
-                    onOpen={() => setRecapFor(project)}
-                  />
-                </TableCell>
-
-                <TableCell align="center">
-                  <Switch
-                    size="small"
-                    disabled={!project.route}
-                    checked={project.route?.enabled ?? false}
-                    onChange={(e) =>
-                      project.route && save(project, project.route.destinationId, e.target.checked)
-                    }
-                  />
-                </TableCell>
-
-                <TableCell align="right">
-                  <Typography variant="caption" color="text.secondary">
-                    {new Date(project.lastSeenAt).toLocaleString()}
-                  </Typography>
-                </TableCell>
-              </TableRow>
-
-              <TableRow>
-                <TableCell colSpan={7} sx={{ py: 0, border: 0 }}>
-                  <Collapse in={expanded === project.slug} unmountOnExit>
-                    <IssueDebugPanel org={org} slug={project.slug} />
-                  </Collapse>
-                </TableCell>
-              </TableRow>
-              </Fragment>
+              <ProjectRow
+                key={project.slug}
+                org={org}
+                project={project}
+                dests={dests}
+                defaultCooldown={defaultCooldown}
+                highlighted={project.slug === highlight}
+                expanded={expanded === project.slug}
+                onToggleDebug={() =>
+                  setExpanded(expanded === project.slug ? null : project.slug)
+                }
+                onOpenRecap={() => setRecapFor(project)}
+                onSave={save}
+              />
             ))}
           </TableBody>
         </Table>

@@ -20,6 +20,7 @@ export class RecapQueueItem extends Model<
   declare level: CreationOptional<string | null>
   declare shortId: CreationOptional<string | null>
   declare eventCount: CreationOptional<number | null>
+  declare frame: CreationOptional<string | null>
   declare matchedPattern: string
   declare firstQueuedAt: CreationOptional<Date>
   declare lastQueuedAt: CreationOptional<Date>
@@ -37,6 +38,7 @@ RecapQueueItem.init(
     level: { type: DataTypes.TEXT, allowNull: true, defaultValue: null },
     shortId: { type: DataTypes.TEXT, allowNull: true, defaultValue: null },
     eventCount: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null },
+    frame: { type: DataTypes.TEXT, allowNull: true, defaultValue: null },
     matchedPattern: { type: DataTypes.TEXT, allowNull: false },
     firstQueuedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     lastQueuedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },

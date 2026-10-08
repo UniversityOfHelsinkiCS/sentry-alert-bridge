@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { compilePatterns, matchRecap, recapDueAt } from '../../../src/server/ingest/recap.js'
+import { recapDueAt } from '../../../src/server/ingest/recap.js'
+import { compilePatterns, matchRecap } from '../../../src/shared/recap.js'
 
 const HELSINKI = 'Europe/Helsinki'
 

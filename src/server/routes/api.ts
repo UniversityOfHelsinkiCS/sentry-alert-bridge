@@ -34,7 +34,7 @@ import { listClaimStates } from '../db/seenIssues.js'
 import { getSettings, type Settings, updateSettings } from '../db/settings.js'
 import { decideAlert } from '../ingest/decide.js'
 import { pollNow, restartPoller } from '../ingest/poller.js'
-import { compilePatterns, matchRecap } from '../ingest/recap.js'
+import { compilePatterns, matchRecap } from '../../shared/recap.js'
 import { runRecapNow } from '../ingest/recapScheduler.js'
 import {
   listNewIssues,
@@ -248,6 +248,7 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
       return {
         id: issue.id,
         title: normalized.title,
+        culprit: normalized.culprit ?? null,
         shortId: normalized.shortId ?? null,
         level: normalized.level ?? null,
         url: normalized.url ?? null,

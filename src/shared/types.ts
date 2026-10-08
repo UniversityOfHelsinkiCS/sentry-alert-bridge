@@ -60,6 +60,7 @@ export type IssueVerdict =
 export interface ProjectIssueDto {
   id: string
   title: string
+  culprit: string | null
   shortId: string | null
   level: string | null
   url: string | null

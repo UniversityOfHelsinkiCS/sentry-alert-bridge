@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedIssue } from '../../../src/shared/types.js'
 import {
+  chunkRecapIssues,
   formatIssue,
   formatRecap,
   markResolved,
@@ -140,7 +141,10 @@ describe('formatRecap', () => {
   const entry = (n: number, overrides: Partial<RecapIssue> = {}): RecapIssue => ({
     issueTitle: `issue ${n}`,
     issueUrl: `https://sentry/issues/${n}`,
+    culprit: null,
     level: 'error',
+    shortId: null,
+    frame: null,
     eventCount: n,
     occurrences: 1,
     ...overrides,
@@ -161,16 +165,96 @@ describe('formatRecap', () => {
     expect(text).toContain('<https://sentry/issues/2|issue 2>')
   })
 
-  it('stays well under the Slack block limit for a large queue', () => {
-    const blocks = recap(Array.from({ length: 200 }, (_, i) => entry(i + 1))).blocks
+  it('keeps every chunk of a large queue under the Slack block limit', () => {
+    const issues = Array.from({ length: 200 }, (_, i) => entry(i + 1))
+    const chunks = chunkRecapIssues(issues)
 
-    expect(blocks.length).toBeLessThan(50)
+    expect(chunks.flat()).toHaveLength(200)
+    for (const chunk of chunks) {
+      expect(recap(chunk).blocks.length).toBeLessThanOrEqual(50)
+    }
   })
 
-  it('caps the listed issues and says how many were left out', () => {
-    const text = JSON.stringify(recap(Array.from({ length: 60 }, (_, i) => entry(i + 1))).blocks)
+  it('hides nothing — a chunk renders every issue it is given', () => {
+    const issues = Array.from({ length: 24 }, (_, i) => entry(i + 1))
+    const text = JSON.stringify(recap(issues).blocks)
 
-    expect(text).toContain('+10 more')
+    for (const issue of issues) {
+      expect(text).toContain(issue.issueUrl)
+    }
+  })
+
+  it('splits a queue across messages without losing or duplicating an issue', () => {
+    const issues = Array.from({ length: 53 }, (_, i) => entry(i + 1))
+    const chunks = chunkRecapIssues(issues)
+
+    expect(chunks).toHaveLength(3)
+
+    const rendered = chunks.flatMap((chunk, i) => {
+      const message = formatRecap({
+        projectLabel: 'backend',
+        issues: chunk,
+        since: null,
+        timeZone: 'Europe/Helsinki',
+        part: i + 1,
+        parts: chunks.length,
+      })
+      expect(message.blocks.length).toBeLessThanOrEqual(50)
+      return chunk.map((issue) => issue.issueUrl)
+    })
+
+    expect(new Set(rendered).size).toBe(53)
+  })
+
+  it('numbers the parts when a recap spans several messages', () => {
+    const single = formatRecap({
+      projectLabel: 'backend',
+      issues: [entry(1)],
+      since: null,
+      timeZone: 'Europe/Helsinki',
+    })
+    const split = formatRecap({
+      projectLabel: 'backend',
+      issues: [entry(1)],
+      since: null,
+      timeZone: 'Europe/Helsinki',
+      part: 2,
+      parts: 3,
+    })
+
+    expect(single.text).not.toContain('part')
+    expect(split.text).toContain('part 2 of 3')
+  })
+
+  it('carries the same detail a regular alert shows', () => {
+    const blocks = recap([
+      entry(1, {
+        culprit: 'app/api/sync',
+        shortId: 'BACK-1',
+        frame: '/opt/app/src/http.ts:42:9 in fetchWithRetry',
+        level: 'warning',
+      }),
+    ]).blocks
+    const text = JSON.stringify(blocks)
+
+    expect(text).toContain('app/api/sync')
+    expect(text).toContain('fetchWithRetry')
+    expect(text).toContain('BACK-1')
+    expect(text).toContain('warning')
+  })
+
+  it('separates issues with dividers but does not trail one', () => {
+    const blocks = recap([entry(1), entry(2), entry(3)]).blocks as { type: string }[]
+
+    expect(blocks.filter((b) => b.type === 'divider')).toHaveLength(2)
+    expect(blocks[blocks.length - 1]?.type).toBe('section')
+  })
+
+  it('omits fields an issue does not have', () => {
+    const text = JSON.stringify(recap([entry(1, { eventCount: null })]).blocks)
+
+    expect(text).not.toContain('*Short ID*')
+    expect(text).not.toContain('*Events*')
   })
 
   it('lists the noisiest issue first', () => {
@@ -180,8 +264,8 @@ describe('formatRecap', () => {
   })
 
   it('mentions repeat sightings only when there were several', () => {
-    expect(JSON.stringify(recap([entry(1, { occurrences: 4 })]).blocks)).toContain('seen 4')
-    expect(JSON.stringify(recap([entry(1, { occurrences: 1 })]).blocks)).not.toContain('seen 1')
+    expect(JSON.stringify(recap([entry(1, { occurrences: 4 })]).blocks)).toContain('4 times')
+    expect(JSON.stringify(recap([entry(1, { occurrences: 1 })]).blocks)).not.toContain('*Seen*')
   })
 
   it('has a fallback text for notifications', () => {

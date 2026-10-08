@@ -1,7 +1,7 @@
 import { Op } from 'sequelize'
 import { RecapQueueItem } from './model/index.js'
 
-export const MAX_RECAP_QUEUE_PER_PROJECT = 500
+export const MAX_RECAP_QUEUE_PER_PROJECT = 100_000
 
 export interface RecapQueueEntry {
   issueId: string
@@ -11,6 +11,7 @@ export interface RecapQueueEntry {
   level: string | null
   shortId: string | null
   eventCount: number | null
+  frame: string | null
   matchedPattern: string
   firstQueuedAt: Date
   lastQueuedAt: Date
@@ -38,13 +39,17 @@ const toEntry = (row: RecapQueueItem): RecapQueueEntry => ({
   level: row.level,
   shortId: row.shortId,
   eventCount: row.eventCount,
+  frame: row.frame,
   matchedPattern: row.matchedPattern,
   firstQueuedAt: row.firstQueuedAt,
   lastQueuedAt: row.lastQueuedAt,
   occurrences: row.occurrences,
 })
 
-export async function queueRecapIssue(item: QueueRecapIssue): Promise<boolean> {
+export async function queueRecapIssue(
+  item: QueueRecapIssue,
+  fetchFrame: () => Promise<string | null>,
+): Promise<boolean> {
   const now = new Date()
   const existing = await RecapQueueItem.findOne({
     where: { orgSlug: item.orgSlug, projectSlug: item.projectSlug, issueId: item.issueId },
@@ -68,7 +73,13 @@ export async function queueRecapIssue(item: QueueRecapIssue): Promise<boolean> {
   const queued = await countRecapQueue(item.orgSlug, item.projectSlug)
   if (queued >= MAX_RECAP_QUEUE_PER_PROJECT) return false
 
-  await RecapQueueItem.create({ ...item, firstQueuedAt: now, lastQueuedAt: now, occurrences: 1 })
+  await RecapQueueItem.create({
+    ...item,
+    frame: await fetchFrame(),
+    firstQueuedAt: now,
+    lastQueuedAt: now,
+    occurrences: 1,
+  })
   return true
 }
 

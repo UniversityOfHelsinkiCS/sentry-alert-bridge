@@ -120,7 +120,10 @@ export function formatIssue(issue: NormalizedIssue, options: FormatOptions = {})
 export interface RecapIssue {
   issueTitle: string
   issueUrl: string
+  culprit: string | null
   level: string | null
+  shortId: string | null
+  frame: string | null
   eventCount: number | null
   occurrences: number
 }
@@ -130,20 +133,11 @@ export interface RecapMessageInput {
   issues: RecapIssue[]
   since: Date | null
   timeZone: string
+  part?: number
+  parts?: number
 }
 
-const RECAP_MAX_ISSUES = 50
-const RECAP_SECTION_MAX_CHARS = 2800
-
-function recapLine(issue: RecapIssue): string {
-  const heading = `<${issue.issueUrl}|${escape(issue.issueTitle)}>`
-  const parts = [`${emojiFor(issue.level)} ${heading}`]
-
-  if (issue.eventCount !== null) parts.push(`${issue.eventCount} events`)
-  if (issue.occurrences > 1) parts.push(`seen ${issue.occurrences}\u00d7`)
-
-  return `\u2022 ${parts.join('  \u00b7  ')}`
-}
+export const RECAP_ISSUES_PER_MESSAGE = 24
 
 function recapSince(since: Date | null, timeZone: string): string {
   if (!since) return 'since the last recap'
@@ -157,47 +151,57 @@ function recapSince(since: Date | null, timeZone: string): string {
   return `since ${formatted}`
 }
 
-function packLines(lines: string[]): unknown[] {
-  const blocks: unknown[] = []
-  let current: string[] = []
-  let length = 0
+function recapBlock(issue: RecapIssue): unknown {
+  const title = escape(issue.issueTitle)
+  const lines = [`${emojiFor(issue.level)} <${issue.issueUrl}|${title}>`]
 
-  for (const line of lines) {
-    if (current.length > 0 && length + line.length + 1 > RECAP_SECTION_MAX_CHARS) {
-      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: current.join('\n') } })
-      current = []
-      length = 0
-    }
-    current.push(line)
-    length += line.length + 1
+  if (issue.culprit) lines.push(`\`${escape(issue.culprit)}\``)
+  if (issue.frame) lines.push(frameText(issue.frame))
+
+  const fields = [
+    field('Level', issue.level),
+    field('Short ID', issue.shortId),
+    field('Events', issue.eventCount === null ? null : String(issue.eventCount)),
+    field('Seen', issue.occurrences > 1 ? `${issue.occurrences} times` : null),
+  ].filter((f): f is NonNullable<typeof f> => f !== null)
+
+  return {
+    type: 'section',
+    text: { type: 'mrkdwn', text: lines.join('\n') },
+    ...(fields.length > 0 ? { fields } : {}),
+  }
+}
+
+export function chunkRecapIssues<T>(issues: T[]): T[][] {
+  const chunks: T[][] = []
+
+  for (let i = 0; i < issues.length; i += RECAP_ISSUES_PER_MESSAGE) {
+    chunks.push(issues.slice(i, i + RECAP_ISSUES_PER_MESSAGE))
   }
 
-  if (current.length > 0) {
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: current.join('\n') } })
-  }
-
-  return blocks
+  return chunks.length > 0 ? chunks : [[]]
 }
 
 export function formatRecap(input: RecapMessageInput): SlackMessage {
-  const total = input.issues.length
   const ordered = [...input.issues].sort((a, b) => (b.eventCount ?? 0) - (a.eventCount ?? 0))
-  const shown = ordered.slice(0, RECAP_MAX_ISSUES)
+  const label = `${ordered.length} ${ordered.length === 1 ? 'issue' : 'issues'}`
+  const parts = input.parts ?? 1
+  const suffix = parts > 1 ? ` (part ${input.part ?? 1} of ${parts})` : ''
 
   const heading =
-    `\ud83d\uddd2\ufe0f *Daily recap \u2014 ${escape(input.projectLabel)}*\n` +
-    `${total} ${total === 1 ? 'issue' : 'issues'} matched this project's recap rules ` +
-    `${recapSince(input.since, input.timeZone)}.`
+    `\ud83d\uddd2\ufe0f *Daily recap \u2014 ${escape(input.projectLabel)}${suffix}*\n` +
+    `${label} matched this project's recap rules ${recapSince(input.since, input.timeZone)}.`
 
-  const lines = shown.map(recapLine)
-  if (total > shown.length) lines.push(`_+${total - shown.length} more_`)
+  const blocks: unknown[] = [{ type: 'section', text: { type: 'mrkdwn', text: heading } }]
+
+  ordered.forEach((issue, index) => {
+    if (index > 0) blocks.push({ type: 'divider' })
+    blocks.push(recapBlock(issue))
+  })
 
   return {
-    text: `\ud83d\uddd2\ufe0f Daily recap \u2014 ${input.projectLabel}: ${total} ${total === 1 ? 'issue' : 'issues'}`,
-    blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: heading } },
-      ...packLines(lines),
-    ],
+    text: `\ud83d\uddd2\ufe0f Daily recap \u2014 ${input.projectLabel}${suffix}: ${label}`,
+    blocks,
   }
 }
 

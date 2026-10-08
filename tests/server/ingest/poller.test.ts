@@ -245,6 +245,7 @@ describe('pollOnce', () => {
         issueId: '1',
         matchedPattern: '^Timeout',
       }),
+      expect.any(Function),
     )
   })
 
@@ -271,6 +272,7 @@ describe('pollOnce', () => {
     expect(handleIssue).not.toHaveBeenCalled()
     expect(queueRecapIssue).toHaveBeenCalledWith(
       expect.objectContaining({ matchedPattern: 'api/sync' }),
+      expect.any(Function),
     )
   })
 
