@@ -7,7 +7,8 @@ import {
   MAX_RECAP_TIMES,
   RECAP_TIME_PATTERN,
 } from '../../shared/types.js'
-import type { ProjectIssuesDto, SettingsDto } from '../../shared/types.js'
+import type { ProjectIssuesDto, SentryDebugDto, SettingsDto } from '../../shared/types.js'
+import { SENTRY_DEBUG_CALLS } from '../../shared/types.js'
 import { requireAuth } from '../auth/middleware.js'
 import { countRoutesUsing, listDeliveries, recordDelivery } from '../db/deliveries.js'
 import {
@@ -37,9 +38,11 @@ import { pollNow, restartPoller } from '../ingest/poller.js'
 import { compilePatterns, matchRecap } from '../../shared/recap.js'
 import { runRecapNow } from '../ingest/recapScheduler.js'
 import {
+  get as sentryGet,
   listNewIssues,
   listOrgProjects,
   normalizeApiIssue,
+  SentryApiError,
   type SentryOrg,
 } from '../sentry/api.js'
 import { sendToSlack } from '../slack/client.js'
@@ -261,6 +264,64 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
   }
 
   res.json(body)
+})
+
+const debugQuerySchema = z.object({
+  call: z.enum(SENTRY_DEBUG_CALLS),
+  project: slugSchema.optional(),
+  issueId: z.string().min(1).max(100).optional(),
+  limit: z.coerce.number().int().positive().default(25),
+})
+
+function debugPath(
+  org: SentryOrg,
+  query: z.infer<typeof debugQuerySchema>,
+): { path: string; search?: Record<string, string> } | string {
+  if (query.call === 'projects') return { path: `/api/0/organizations/${org.slug}/projects/` }
+
+  if (query.call === 'issues') {
+    if (!query.project) return 'a project slug is required for the issues call'
+    return {
+      path: `/api/0/projects/${org.slug}/${query.project}/issues/`,
+      search: { query: 'is:unresolved', sort: 'new', limit: String(query.limit) },
+    }
+  }
+
+  if (!query.issueId) return 'an issue id is required for the latest event call'
+
+  return { path: `/api/0/issues/${encodeURIComponent(query.issueId)}/events/latest/` }
+}
+
+apiRouter.get('/debug/sentry', async (req, res) => {
+  const org = await requireOrg(req, res)
+  if (!org) return
+
+  const parsed = debugQuerySchema.safeParse(req.query)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'invalid debug query' })
+    return
+  }
+
+  const target = debugPath(org, parsed.data)
+  if (typeof target === 'string') {
+    res.status(400).json({ error: target })
+    return
+  }
+
+  try {
+    const body: SentryDebugDto = {
+      call: parsed.data.call,
+      path: target.path,
+      body: await sentryGet(org, target.path, target.search),
+    }
+    res.json(body)
+  } catch (err) {
+    const status = err instanceof SentryApiError ? err.status : 0
+    res.status(502).json({
+      error: err instanceof Error ? err.message : 'the Sentry request failed',
+      status,
+    })
+  }
 })
 
 apiRouter.post('/projects', async (req, res) => {

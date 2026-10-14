@@ -153,7 +153,8 @@ function recapSince(since: Date | null, timeZone: string): string {
 
 function recapBlock(issue: RecapIssue): unknown {
   const title = escape(issue.issueTitle)
-  const lines = [`${emojiFor(issue.level)} <${issue.issueUrl}|${title}>`]
+  const heading = issue.issueUrl ? `<${issue.issueUrl}|${title}>` : title
+  const lines = [`${emojiFor(issue.level)} ${heading}`]
 
   if (issue.culprit) lines.push(`\`${escape(issue.culprit)}\``)
   if (issue.frame) lines.push(frameText(issue.frame))

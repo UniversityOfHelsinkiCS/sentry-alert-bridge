@@ -6,6 +6,8 @@ import type {
   OrgDto,
   ProjectDto,
   ProjectIssuesDto,
+  SentryDebugCall,
+  SentryDebugDto,
   SettingsDto,
 } from '../shared/types'
 
@@ -72,6 +74,18 @@ export const api = {
     request<{ ok: true; projects: number }>(`/orgs/${encodeURIComponent(slug)}/test`, {
       method: 'POST',
     }),
+
+  debugSentry: (
+    org: string,
+    call: SentryDebugCall,
+    extra: { project?: string; issueId?: string; limit?: string } = {},
+  ) => {
+    const params: Record<string, string> = { call }
+    if (extra.project) params.project = extra.project
+    if (extra.issueId) params.issueId = extra.issueId
+    if (extra.limit) params.limit = extra.limit
+    return request<SentryDebugDto>(scoped('/debug/sentry', org, params))
+  },
 
   projects: (org: string) => request<ProjectDto[]>(scoped('/projects', org)),
   projectIssues: (org: string, slug: string) =>

@@ -15,6 +15,7 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-r
 import type { MeDto } from '../shared/types'
 import { api, ApiError, useApi } from './api'
 import { OrgProvider, useOrgState } from './OrgContext'
+import DebugPage from './pages/DebugPage'
 import DeliveriesPage from './pages/DeliveriesPage'
 import DestinationsPage from './pages/DestinationsPage'
 import LoginPage from './pages/LoginPage'
@@ -28,6 +29,7 @@ const TABS = [
   { label: 'Destinations', path: '/destinations' },
   { label: 'Deliveries', path: '/deliveries' },
   { label: 'Settings', path: '/settings' },
+  { label: 'Debug', path: '/debug' },
 ]
 
 type AuthState = 'checking' | 'in' | 'out'
@@ -160,6 +162,7 @@ function AppShell({ me, onLoggedOut }: { me: MeDto | null; onLoggedOut: () => vo
           <Route path="/deliveries" element={<DeliveriesPage />} />
           <Route path="/orgs" element={<OrgsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/debug" element={<DebugPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </OrgGate>

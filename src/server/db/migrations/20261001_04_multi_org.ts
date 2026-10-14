@@ -1,10 +1,9 @@
 import { DataTypes, literal, type QueryInterface } from 'sequelize'
 
-import { config } from '../../config.js'
 import type { Migration } from '../connection.js'
-import { SentryOrg } from '../model/index.js'
 
-const SEED_SLUG = config.SENTRY_ORG_SLUG
+const SEED_SLUG = process.env.SENTRY_ORG_SLUG?.trim() || 'sentry'
+const SEED_AUTH_TOKEN = process.env.SENTRY_AUTH_TOKEN?.trim() || ''
 
 const ORG_SCOPED = ['sentry_projects', 'routes', 'seen_issues', 'slack_destinations']
 
@@ -42,16 +41,11 @@ export const up: Migration = async ({ context: queryInterface }) => {
       { transaction },
     )
 
-    await SentryOrg.findOrCreate({
-      where: { slug: SEED_SLUG },
-      defaults: {
-        slug: SEED_SLUG,
-        name: null,
-        authToken: config.SENTRY_AUTH_TOKEN ?? '',
-        baseUrl: null,
-      },
-      transaction,
-    })
+    await queryInterface.bulkInsert(
+      'sentry_orgs',
+      [{ slug: SEED_SLUG, name: null, auth_token: SEED_AUTH_TOKEN, base_url: null }],
+      { transaction },
+    )
 
     for (const table of [...ORG_SCOPED, 'deliveries']) {
       await queryInterface.addColumn(

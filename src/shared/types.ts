@@ -129,3 +129,13 @@ export interface MeDto {
 export interface ApiError {
   error: string
 }
+
+export const SENTRY_DEBUG_CALLS = ['projects', 'issues', 'event'] as const
+
+export type SentryDebugCall = (typeof SENTRY_DEBUG_CALLS)[number]
+
+export interface SentryDebugDto {
+  call: SentryDebugCall
+  path: string
+  body: unknown
+}

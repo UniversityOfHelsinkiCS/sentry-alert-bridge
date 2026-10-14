@@ -165,6 +165,13 @@ describe('formatRecap', () => {
     expect(text).toContain('<https://sentry/issues/2|issue 2>')
   })
 
+  it('renders a plain title when a queued issue has no url', () => {
+    const text = JSON.stringify(recap([entry(1, { issueUrl: '' })]).blocks)
+
+    expect(text).toContain('issue 1')
+    expect(text).not.toContain('<|issue 1>')
+  })
+
   it('keeps every chunk of a large queue under the Slack block limit', () => {
     const issues = Array.from({ length: 200 }, (_, i) => entry(i + 1))
     const chunks = chunkRecapIssues(issues)

@@ -75,7 +75,7 @@ async function request(
   return res.json()
 }
 
-async function get(
+export async function get(
   org: SentryOrg,
   path: string,
   search?: Record<string, string>,
@@ -123,6 +123,27 @@ export async function resolveIssue(org: SentryOrg, issueId: string): Promise<voi
   })
 }
 
+function permalinkPath(permalink: string | null): string | null {
+  if (!permalink) return null
+
+  try {
+    const parsed = new URL(permalink, 'http://placeholder.invalid')
+    const path = `${parsed.pathname}${parsed.search}`.replace(/^\/+/, '')
+    return path.length > 0 ? path : null
+  } catch {
+    return null
+  }
+}
+
+export function issueUrl(org: SentryOrg, issueId: string, permalink: string | null): string {
+  const base = new URL(org.baseUrl?.trim() || config.SENTRY_BASE_URL)
+  const relative = permalinkPath(permalink) ?? `organizations/${org.slug}/issues/${issueId}/`
+  const prefix = base.pathname.replace(/\/+$/, '')
+  const built = new URL(`${prefix}/${relative}`, base)
+
+  return built.toString()
+}
+
 export function normalizeApiIssue(
   org: SentryOrg,
   issue: ApiIssue,
@@ -137,12 +158,7 @@ export function normalizeApiIssue(
     culprit: issue.culprit ?? null,
     level: issue.level ?? null,
     shortId: issue.shortId ?? null,
-    url:
-      issue.permalink ??
-      new URL(
-        `/organizations/${org.slug}/issues/${issue.id}/`,
-        org.baseUrl ?? config.SENTRY_BASE_URL,
-      ).toString(),
+    url: issueUrl(org, issue.id, issue.permalink ?? null),
     count: issue.count === null || issue.count === undefined ? null : Number(issue.count),
     projectSlug,
     projectName,
