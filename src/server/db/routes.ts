@@ -7,6 +7,7 @@ export interface Route {
   enabled: boolean
   alertsFrom: Date
   cooldownMinutes: number | null
+  backoffCeilingMinutes: number | null
   recapPatterns: string[]
   recapTimes: string[]
   lastRecapAt: Date | null
@@ -19,6 +20,7 @@ const toRoute = (row: RouteModel): Route => ({
   enabled: row.enabled,
   alertsFrom: row.alertsFrom,
   cooldownMinutes: row.cooldownMinutes,
+  backoffCeilingMinutes: row.backoffCeilingMinutes,
   recapPatterns: row.recapPatterns ?? [],
   recapTimes: row.recapTimes ?? [],
   lastRecapAt: row.lastRecapAt,
@@ -43,6 +45,7 @@ export async function upsertRoute(
   destinationId: number,
   enabled: boolean,
   cooldownMinutes: number | null,
+  backoffCeilingMinutes: number | null,
 ): Promise<void> {
   await RouteModel.upsert({
     orgSlug,
@@ -50,6 +53,7 @@ export async function upsertRoute(
     destinationId,
     enabled,
     cooldownMinutes,
+    backoffCeilingMinutes,
     updatedAt: new Date(),
   })
 }

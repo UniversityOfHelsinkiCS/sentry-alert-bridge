@@ -68,6 +68,7 @@ export interface ProjectIssueDto {
   lastSeen: string | null
   /** When this app last alerted on it; null means never. */
   alertedAt: string | null
+  cooldownMinutes: number
   verdict: IssueVerdict
 }
 
@@ -90,6 +91,7 @@ export interface ProjectDto {
     destinationId: number
     enabled: boolean
     cooldownMinutes: number | null
+    backoffCeilingMinutes: number | null
     updatedAt: string
     recapPatterns: string[]
     recapTimes: string[]

@@ -98,10 +98,11 @@ export const api = {
     destinationId: number,
     enabled: boolean,
     cooldownMinutes: number | null = null,
+    backoffCeilingMinutes: number | null = null,
   ) =>
     request<ProjectDto[]>(scoped(`/routes/${encodeURIComponent(slug)}`, org), {
       method: 'PUT',
-      ...body({ destinationId, enabled, cooldownMinutes }),
+      ...body({ destinationId, enabled, cooldownMinutes, backoffCeilingMinutes }),
     }),
   setRouteRecap: (org: string, slug: string, patterns: string[], times: string[]) =>
     request<ProjectDto[]>(scoped(`/routes/${encodeURIComponent(slug)}/recap`, org), {

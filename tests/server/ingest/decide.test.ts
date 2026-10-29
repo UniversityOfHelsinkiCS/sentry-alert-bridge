@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decideAlert } from '../../../src/server/ingest/decide.js'
+import { decideAlert, isQuietSinceAlert } from '../../../src/server/ingest/decide.js'
 
 const NOW = Date.parse('2026-09-25T12:00:00Z')
 const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString()
@@ -22,7 +22,7 @@ describe('decideAlert', () => {
       decide({
         lastSeen: iso(30_000),
         alertsFrom,
-        state: { alertedAt: new Date(NOW - 5 * HOUR), releasedAt: null },
+        state: { alertedAt: new Date(NOW - 5 * HOUR), releasedAt: null, alertStreak: 1 },
       }),
     ).toBe('alert')
   })
@@ -32,7 +32,7 @@ describe('decideAlert', () => {
       decide({
         lastSeen: iso(6 * HOUR),
         alertsFrom,
-        state: { alertedAt: new Date(NOW - 5 * HOUR), releasedAt: null },
+        state: { alertedAt: new Date(NOW - 5 * HOUR), releasedAt: null, alertStreak: 1 },
       }),
     ).toBe('no-new-events')
   })
@@ -42,7 +42,7 @@ describe('decideAlert', () => {
       decide({
         lastSeen: iso(60_000),
         alertsFrom,
-        state: { alertedAt: new Date(NOW - 10 * 60_000), releasedAt: null },
+        state: { alertedAt: new Date(NOW - 10 * 60_000), releasedAt: null, alertStreak: 1 },
       }),
     ).toBe('in-cooldown')
   })
@@ -52,7 +52,7 @@ describe('decideAlert', () => {
       decide({
         lastSeen: iso(60_000),
         alertsFrom,
-        state: { alertedAt: new Date(NOW - 10 * 60_000), releasedAt: new Date(NOW - 20 * 60_000) },
+        state: { alertedAt: new Date(NOW - 10 * 60_000), releasedAt: new Date(NOW - 20 * 60_000), alertStreak: 1 },
       }),
     ).toBe('alert')
   })
@@ -80,8 +80,56 @@ describe('decideAlert', () => {
         cooldownMs: 0,
         lastSeen: iso(60_000),
         alertsFrom,
-        state: { alertedAt: new Date(NOW - 2 * 60_000), releasedAt: null },
+        state: { alertedAt: new Date(NOW - 2 * 60_000), releasedAt: null, alertStreak: 1 },
       }),
     ).toBe('alert')
+  })
+
+  it('doubles the cooldown for each re-alert in a streak', () => {
+    expect(
+      decide({
+        lastSeen: iso(60_000),
+        alertsFrom,
+        backoffCeilingMs: 10 * HOUR,
+        state: { alertedAt: new Date(NOW - 3 * HOUR), releasedAt: null, alertStreak: 3 },
+      }),
+    ).toBe('in-cooldown')
+  })
+
+  it('caps the grown cooldown at the backoff ceiling', () => {
+    expect(
+      decide({
+        lastSeen: iso(60_000),
+        alertsFrom,
+        backoffCeilingMs: 2 * HOUR,
+        state: { alertedAt: new Date(NOW - 3 * HOUR), releasedAt: null, alertStreak: 10 },
+      }),
+    ).toBe('alert')
+  })
+
+  it('keeps the fixed cooldown when there is no backoff ceiling', () => {
+    expect(
+      decide({
+        lastSeen: iso(60_000),
+        alertsFrom,
+        backoffCeilingMs: null,
+        state: { alertedAt: new Date(NOW - 2 * HOUR), releasedAt: null, alertStreak: 5 },
+      }),
+    ).toBe('alert')
+  })
+})
+
+describe('isQuietSinceAlert', () => {
+  const quiet = (alertedHoursAgo: number) =>
+    isQuietSinceAlert({
+      now: NOW,
+      cooldownMs: HOUR,
+      backoffCeilingMs: 3 * HOUR,
+      state: { alertedAt: new Date(NOW - alertedHoursAgo * HOUR), releasedAt: null, alertStreak: 2 },
+    })
+
+  it('needs a full ceiling past the end of the grown cooldown', () => {
+    expect(quiet(4)).toBe(false)
+    expect(quiet(6)).toBe(true)
   })
 })

@@ -3,9 +3,9 @@ import { listPollableOrgs } from '../db/orgs.js'
 import { upsertProject } from '../db/projects.js'
 import { listEnabledRoutes, type Route } from '../db/routes.js'
 import { pruneRecapQueue, queueRecapIssue } from '../db/recapQueue.js'
-import { listClaimStates, pruneSeenIssues } from '../db/seenIssues.js'
+import { listClaimStates, pruneSeenIssues, resetAlertStreak } from '../db/seenIssues.js'
 import { getSettings, touchLastPoll } from '../db/settings.js'
-import { decideAlert } from './decide.js'
+import { decideAlert, isQuietSinceAlert } from './decide.js'
 import { compilePatterns, matchRecap } from '../../shared/recap.js'
 import { logger } from '../logger.js'
 import { topFrame } from '../sentry/frame.js'
@@ -120,13 +120,16 @@ async function alertOnIssues(issues: ApiIssue[], ctx: AlertContext): Promise<voi
   const { org, route, summary } = ctx
   const states = await listClaimStates(org.slug, route.projectSlug)
   const recapPatterns = compilePatterns(route.recapPatterns)
+  const cooldownMs = (route.cooldownMinutes ?? ctx.defaultCooldownMinutes) * 60_000
+  const backoffCeilingMs =
+    route.backoffCeilingMinutes === null ? null : route.backoffCeilingMinutes * 60_000
 
   for (const issue of issues) {
+    const cooldown = { state: states.get(issue.id), cooldownMs, backoffCeilingMs }
     const decision = decideAlert({
       lastSeen: issue.lastSeen,
       alertsFrom: route.alertsFrom,
-      state: states.get(issue.id),
-      cooldownMs: (route.cooldownMinutes ?? ctx.defaultCooldownMinutes) * 60_000,
+      ...cooldown,
     })
 
     if (decision !== 'alert') {
@@ -136,6 +139,10 @@ async function alertOnIssues(issues: ApiIssue[], ctx: AlertContext): Promise<voi
         'issue not alertable',
       )
       continue
+    }
+
+    if (isQuietSinceAlert(cooldown)) {
+      await resetAlertStreak(org.slug, route.projectSlug, issue.id)
     }
 
     const matched = matchRecap(

@@ -33,7 +33,7 @@ import { listProjects, upsertProject } from '../db/projects.js'
 import { deleteRoute, getRoute, updateRouteRecap, upsertRoute } from '../db/routes.js'
 import { listClaimStates } from '../db/seenIssues.js'
 import { getSettings, type Settings, updateSettings } from '../db/settings.js'
-import { decideAlert } from '../ingest/decide.js'
+import { currentCooldownMs, decideAlert } from '../ingest/decide.js'
 import { pollNow, restartPoller } from '../ingest/poller.js'
 import { compilePatterns, matchRecap } from '../../shared/recap.js'
 import { runRecapNow } from '../ingest/recapScheduler.js'
@@ -228,6 +228,8 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
 
   const cooldownMinutes = route.cooldownMinutes ?? settings.alertCooldownMinutes
   const cooldownMs = cooldownMinutes * 60_000
+  const backoffCeilingMs =
+    route.backoffCeilingMinutes === null ? null : route.backoffCeilingMinutes * 60_000
   const recapPatterns = compilePatterns(route.recapPatterns)
 
   const body: ProjectIssuesDto = {
@@ -238,11 +240,11 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
     issues: issues.map((issue) => {
       const normalized = normalizeApiIssue(org, issue, projectSlug, null)
       const state = states.get(issue.id)
+      const cooldown = { state, cooldownMs, backoffCeilingMs }
       const decision = decideAlert({
         lastSeen: issue.lastSeen,
         alertsFrom: route.alertsFrom,
-        state,
-        cooldownMs,
+        ...cooldown,
       })
       const recapped =
         decision === 'alert' &&
@@ -258,6 +260,7 @@ apiRouter.get('/projects/:slug/issues', async (req, res) => {
         firstSeen: issue.firstSeen ?? null,
         lastSeen: issue.lastSeen ?? null,
         alertedAt: state?.alertedAt?.toISOString() ?? null,
+        cooldownMinutes: currentCooldownMs(cooldown) / 60_000,
         verdict: recapped ? ('recap' as const) : decision,
       }
     }),
@@ -349,6 +352,7 @@ apiRouter.put('/routes/:slug', async (req, res) => {
       destinationId: z.number().int().positive(),
       enabled: z.boolean().default(true),
       cooldownMinutes: z.number().int().min(0).max(MAX_COOLDOWN_MINUTES).nullable().default(null),
+      backoffCeilingMinutes: z.number().int().min(0).max(MAX_COOLDOWN_MINUTES).nullable().default(null),
     })
     .safeParse(req.body)
 
@@ -369,6 +373,7 @@ apiRouter.put('/routes/:slug', async (req, res) => {
     body.data.destinationId,
     body.data.enabled,
     body.data.cooldownMinutes,
+    body.data.backoffCeilingMinutes,
   )
   res.json(await listProjects(org.slug))
 })

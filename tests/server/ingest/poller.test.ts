@@ -7,7 +7,8 @@ const listNewIssues =
   vi.fn<(org: typeof ORG, slug: string, limit?: number) => Promise<ApiIssue[]>>()
 const listOrgProjects = vi.fn(async () => [{ slug: 'backend', name: 'Backend' }])
 const getLatestEvent = vi.fn<() => Promise<unknown>>(async () => null)
-const listClaimStates = vi.fn(async () => new Map<string, { alertedAt: Date | null; releasedAt: Date | null }>())
+const listClaimStates = vi.fn(async () => new Map<string, { alertedAt: Date | null; releasedAt: Date | null; alertStreak: number }>())
+const resetAlertStreak = vi.fn(async () => undefined)
 
 vi.mock('../../../src/server/ingest/index.js', () => ({ handleIssue }))
 vi.mock('../../../src/server/sentry/api.js', async () => {
@@ -31,6 +32,7 @@ vi.mock('../../../src/server/db/settings.js', () => ({
 }))
 vi.mock('../../../src/server/db/seenIssues.js', () => ({
   listClaimStates,
+  resetAlertStreak,
   pruneSeenIssues: vi.fn(async () => 0),
 }))
 const queueRecapIssue = vi.fn(async () => true)
@@ -54,6 +56,7 @@ function route(recapPatterns: string[] = []) {
     enabled: true,
     alertsFrom: ROUTED_AT,
     cooldownMinutes: null,
+    backoffCeilingMinutes: null,
     recapPatterns,
     recapTimes: recapPatterns.length > 0 ? ['09:00'] : [],
     lastRecapAt: null,
@@ -75,6 +78,7 @@ describe('pollOnce', () => {
     listNewIssues.mockReset()
     listClaimStates.mockClear()
     listClaimStates.mockResolvedValue(new Map())
+    resetAlertStreak.mockClear()
     getLatestEvent.mockReset()
     getLatestEvent.mockResolvedValue(null)
     queueRecapIssue.mockClear()
@@ -146,7 +150,7 @@ describe('pollOnce', () => {
   it('alerts on a month-old issue that was just seen again', async () => {
     listNewIssues.mockResolvedValue([issue('ancient', 1, 30)])
     listClaimStates.mockResolvedValue(
-      new Map([['ancient', { alertedAt: new Date(Date.now() - 5 * 60 * 60_000), releasedAt: null }]]),
+      new Map([['ancient', { alertedAt: new Date(Date.now() - 5 * 60 * 60_000), releasedAt: null, alertStreak: 1 }]]),
     )
 
     await pollOnce()
@@ -157,7 +161,7 @@ describe('pollOnce', () => {
   it('stays quiet when nothing has happened since the last alert', async () => {
     listNewIssues.mockResolvedValue([issue('quiet', 6 * 60)])
     listClaimStates.mockResolvedValue(
-      new Map([['quiet', { alertedAt: new Date(Date.now() - 60 * 60_000), releasedAt: null }]]),
+      new Map([['quiet', { alertedAt: new Date(Date.now() - 60 * 60_000), releasedAt: null, alertStreak: 1 }]]),
     )
 
     const summary = await pollOnce()
@@ -170,7 +174,7 @@ describe('pollOnce', () => {
     // ALERT_COOLDOWN_MINUTES is 60 by default.
     listNewIssues.mockResolvedValue([issue('noisy', 1)])
     listClaimStates.mockResolvedValue(
-      new Map([['noisy', { alertedAt: new Date(Date.now() - 10 * 60_000), releasedAt: null }]]),
+      new Map([['noisy', { alertedAt: new Date(Date.now() - 10 * 60_000), releasedAt: null, alertStreak: 1 }]]),
     )
 
     const summary = await pollOnce()
@@ -188,6 +192,7 @@ describe('pollOnce', () => {
           {
             alertedAt: new Date(Date.now() - 10 * 60_000),
             releasedAt: new Date(Date.now() - 5 * 60_000),
+            alertStreak: 1,
           },
         ],
       ]),
@@ -299,5 +304,31 @@ describe('pollOnce', () => {
     expect(handleIssue).not.toHaveBeenCalled()
     expect(summary.recapped).toBe(0)
     expect(summary.skipped).toBe(1)
+  })
+
+  it('holds a streaking issue for its grown cooldown', async () => {
+    listEnabledRoutes.mockResolvedValue([{ ...route(), backoffCeilingMinutes: 600 }])
+    listNewIssues.mockResolvedValue([issue('streaky', 1)])
+    listClaimStates.mockResolvedValue(
+      new Map([['streaky', { alertedAt: new Date(Date.now() - 2 * 60 * 60_000), releasedAt: null, alertStreak: 3 }]]),
+    )
+
+    const summary = await pollOnce()
+
+    expect(handleIssue).not.toHaveBeenCalled()
+    expect(summary.skipped).toBe(1)
+  })
+
+  it('resets the streak of an issue that went quiet, then alerts', async () => {
+    listEnabledRoutes.mockResolvedValue([{ ...route(), backoffCeilingMinutes: 120 }])
+    listNewIssues.mockResolvedValue([issue('woke', 1)])
+    listClaimStates.mockResolvedValue(
+      new Map([['woke', { alertedAt: new Date(Date.now() - 5 * 60 * 60_000), releasedAt: null, alertStreak: 2 }]]),
+    )
+
+    await pollOnce()
+
+    expect(resetAlertStreak).toHaveBeenCalledWith('sentry', 'backend', 'woke')
+    expect(handleIssue).toHaveBeenCalledWith(expect.objectContaining({ id: 'woke' }), 'polling')
   })
 })

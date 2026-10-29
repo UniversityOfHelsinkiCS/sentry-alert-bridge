@@ -17,6 +17,7 @@ export class SeenIssue extends Model<
   declare seenAt: CreationOptional<Date>
   declare releasedAt: CreationOptional<Date | null>
   declare alertedAt: CreationOptional<Date | null>
+  declare alertStreak: CreationOptional<number>
 }
 
 SeenIssue.init(
@@ -27,6 +28,7 @@ SeenIssue.init(
     seenAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     releasedAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
     alertedAt: { type: DataTypes.DATE, allowNull: true, defaultValue: null },
+    alertStreak: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   },
   { ...common, tableName: 'seen_issues' },
 )

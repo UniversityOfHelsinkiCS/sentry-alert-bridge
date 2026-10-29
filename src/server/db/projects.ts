@@ -37,6 +37,7 @@ export async function listProjects(orgSlug: string): Promise<ProjectDto[]> {
             destinationId: route.destinationId,
             enabled: route.enabled,
             cooldownMinutes: route.cooldownMinutes,
+            backoffCeilingMinutes: route.backoffCeilingMinutes,
             updatedAt: (route.updatedAt ?? project.lastSeenAt).toISOString(),
             recapPatterns: route.recapPatterns ?? [],
             recapTimes: route.recapTimes ?? [],
